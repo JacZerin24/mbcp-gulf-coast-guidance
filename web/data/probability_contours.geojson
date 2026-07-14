@@ -1,0 +1,9 @@
+{
+  "type": "FeatureCollection",
+  "features": [],
+  "properties": {
+    "name": "Damaging Wind Probability",
+    "unit": "percent",
+    "status": "placeholder until first guidance run"
+  }
+}
