@@ -1,0 +1,14 @@
+{
+  "generated_at_utc": null,
+  "cycle": {
+    "model": "RAP",
+    "product": "prs",
+    "forecast_hour": 0,
+    "cycle_time_utc": "not generated yet",
+    "source": "placeholder"
+  },
+  "product": "Experimental Gulf Coast Conditional Damaging Wind Index",
+  "index_contours": "index_contours.geojson",
+  "probability_contours": "probability_contours.geojson",
+  "disclaimer": "Experimental/research guidance only. Not official NWS operational guidance."
+}
