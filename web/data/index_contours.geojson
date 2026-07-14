@@ -1,0 +1,9 @@
+{
+  "type": "FeatureCollection",
+  "features": [],
+  "properties": {
+    "name": "Experimental 0-10 Index",
+    "unit": "index",
+    "status": "placeholder until first guidance run"
+  }
+}
