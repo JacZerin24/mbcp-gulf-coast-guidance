@@ -88,15 +88,23 @@ web/assets/latest_index.png
 
 ## GitHub Pages
 
-After merging the scaffold, enable GitHub Pages from the repository settings:
+The repository includes a Pages deployment workflow:
 
-1. Go to **Settings -> Pages**.
-2. Select **Deploy from a branch**.
-3. Use branch `main` and folder `/web`, or configure a Pages workflow later.
+```text
+.github/workflows/deploy_pages.yml
+```
+
+and the hourly guidance workflow also deploys the `web/` folder after generating new data:
+
+```text
+.github/workflows/update_guidance.yml
+```
+
+After merging the scaffold, go to **Settings -> Pages** and set the build/deployment source to **GitHub Actions**. Then run **Deploy static web map** once from the Actions tab to publish the placeholder site, followed by **Update RAP guidance** to generate and publish the latest RAP-based guidance.
 
 ## Automation
 
-The included workflow is located at:
+The included update workflow is located at:
 
 ```text
 .github/workflows/update_guidance.yml
