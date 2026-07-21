@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import json
+import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 
 from mbcp_guidance.config import load_json, load_yaml, repo_root
@@ -19,11 +22,50 @@ def parse_args():
     p.add_argument("--domain", type=Path, default=root / "config" / "domain.yml")
     p.add_argument("--model", type=Path, default=root / "config" / "refined_gulf_coast_model.json")
     p.add_argument("--cache-dir", type=Path, default=root / "cache")
+    p.add_argument(
+        "--fail-on-error",
+        action="store_true",
+        help="Return a non-zero exit code on RAP/model errors. Default writes an error status for the web page and exits successfully.",
+    )
     return p.parse_args()
 
 
-def main():
-    args = parse_args()
+def write_error_outputs(output_dir: Path, asset_dir: Path, err: BaseException) -> None:
+    """Write a web-readable error status without deleting existing contours/images.
+
+    This keeps GitHub Pages deployable even when the RAP download, GRIB decoding, or
+    derived-field calculation fails. It also preserves a traceback for debugging.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    asset_dir.mkdir(parents=True, exist_ok=True)
+
+    tb = traceback.format_exc()
+    (output_dir / "guidance_error.txt").write_text(tb, encoding="utf-8")
+
+    payload = {
+        "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "status": "error",
+        "error_message": str(err),
+        "error_log": "guidance_error.txt",
+        "cycle": {
+            "model": "RAP",
+            "product": "prs",
+            "forecast_hour": 0,
+            "cycle_time_utc": "not generated",
+            "source": "RAP guidance generation failed",
+        },
+        "product": "Experimental Gulf Coast Conditional Damaging Wind Index",
+        "index_contours": "index_contours.geojson",
+        "probability_contours": "probability_contours.geojson",
+        "disclaimer": "Experimental/research guidance only. Not official NWS operational guidance.",
+    }
+    (output_dir / "latest.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    print("RAP guidance generation failed, but wrote web error outputs.")
+    print(tb)
+
+
+def generate_guidance(args) -> None:
     domain_cfg = load_yaml(args.domain)
     model_cfg = load_json(args.model)
     bbox = domain_cfg["bbox"]
@@ -74,7 +116,22 @@ def main():
     )
     write_latest_json(args.output_dir / "latest.json", cycle_meta)
 
+    # Remove old error log after a successful run so the web data directory reflects current status.
+    error_log = args.output_dir / "guidance_error.txt"
+    if error_log.exists():
+        error_log.unlink()
+
     print("Done.")
+
+
+def main():
+    args = parse_args()
+    try:
+        generate_guidance(args)
+    except Exception as err:
+        write_error_outputs(args.output_dir, args.asset_dir, err)
+        if args.fail_on_error:
+            raise
 
 
 if __name__ == "__main__":
