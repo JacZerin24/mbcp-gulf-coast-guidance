@@ -17,7 +17,15 @@ def latest_rap_f00(max_lookback_hours: int = 12, cache_dir: str | Path = "cache"
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    # Herbie/pandas currently expects a timezone-naive datetime representing UTC.
+    # Passing an aware UTC datetime can trigger "Cannot compare tz-naive and
+    # tz-aware timestamps" while Herbie checks model availability.
+    now = datetime.now(timezone.utc).replace(
+        tzinfo=None,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
     errors: list[str] = []
 
     for hours_back in range(max_lookback_hours + 1):
