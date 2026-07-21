@@ -2,6 +2,14 @@ name: Update RAP guidance
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "mbcp_guidance/**"
+      - "scripts/**"
+      - "config/**"
+      - "requirements.txt"
+      - ".github/workflows/update_guidance.yml"
   schedule:
     # Hourly. GitHub schedules are approximate, not exact.
     - cron: "35 * * * *"
@@ -44,11 +52,22 @@ jobs:
           python -m pip install -r requirements.txt
 
       - name: Generate latest RAP guidance
+        id: guidance
+        continue-on-error: true
         run: |
           PYTHONPATH=. python scripts/run_guidance.py \
             --output-dir web/data \
             --asset-dir web/assets \
             --fail-on-error
+
+      - name: Upload RAP error log
+        if: steps.guidance.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rap-guidance-error
+          path: web/data/guidance_error.txt
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Commit updated web data
         uses: stefanzweifel/git-auto-commit-action@v5
@@ -67,3 +86,9 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Mark failed guidance generation
+        if: steps.guidance.outcome == 'failure'
+        run: |
+          echo "RAP guidance generation failed. See the rap-guidance-error artifact and web/data/guidance_error.txt."
+          exit 1
