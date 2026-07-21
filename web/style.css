@@ -4,23 +4,39 @@
   --text: #e5e7eb;
   --muted: #9ca3af;
   --accent: #f97316;
+  --header-h: 74px;
+  --sidebar-w: 320px;
 }
 
 * { box-sizing: border-box; }
+
+html,
 body {
+  height: 100%;
   margin: 0;
+}
+
+body {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--text);
   background: var(--bg);
+  overflow: hidden;
 }
 
 header {
+  flex: 0 0 auto;
+  min-height: var(--header-h);
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
   padding: 0.85rem 1rem;
   border-bottom: 1px solid rgba(255,255,255,0.12);
+  background: var(--bg);
+  z-index: 1000;
 }
 
 h1 { margin: 0; font-size: 1.25rem; }
@@ -36,26 +52,51 @@ p { color: var(--muted); }
 }
 
 main {
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
-  grid-template-columns: 1fr 320px;
-  min-height: calc(100vh - 74px);
+  grid-template-columns: minmax(0, 1fr) var(--sidebar-w);
+  width: 100%;
+  overflow: hidden;
 }
 
-#map { min-height: calc(100vh - 74px); }
+#map {
+  position: relative;
+  height: calc(100vh - var(--header-h));
+  min-height: 0;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
 aside {
+  height: calc(100vh - var(--header-h));
+  min-height: 0;
   background: var(--panel);
   padding: 1rem;
   border-left: 1px solid rgba(255,255,255,0.12);
   overflow-y: auto;
+  z-index: 900;
 }
 
 aside h2 { font-size: 1rem; margin: 1rem 0 0.4rem; }
 label { display: block; margin: 0.4rem 0; }
 a { color: #93c5fd; }
 .leaflet-container { background: #dbeafe; }
+.leaflet-control-container { color: #111827; }
 
 @media (max-width: 850px) {
-  main { grid-template-columns: 1fr; }
-  aside { border-left: 0; border-top: 1px solid rgba(255,255,255,0.12); }
-  #map { min-height: 65vh; }
+  body { overflow-y: auto; }
+  main {
+    display: block;
+    overflow: visible;
+  }
+  #map {
+    height: 65vh;
+  }
+  aside {
+    height: auto;
+    border-left: 0;
+    border-top: 1px solid rgba(255,255,255,0.12);
+  }
 }
