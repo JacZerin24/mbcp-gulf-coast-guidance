@@ -7,33 +7,57 @@ import cfgrib
 import xarray as xr
 
 
-def latest_rap_f00(max_lookback_hours: int = 12):
-    """Return the newest available 0-hr RAP pressure-level analysis via Herbie."""
+RAP_PRESSURE_PRODUCT = "awp130pgrb"
+
+
+def latest_rap_f00(max_lookback_hours: int = 12, cache_dir: str | Path = "cache"):
+    """Return the newest available 0-hr 13-km RAP pressure-level analysis."""
     from herbie import Herbie
 
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
     now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    errors: list[str] = []
+
     for hours_back in range(max_lookback_hours + 1):
         dt = now - timedelta(hours=hours_back)
         try:
-            h = Herbie(dt, model="rap", product="prs", fxx=0)
+            h = Herbie(
+                dt,
+                model="rap",
+                product=RAP_PRESSURE_PRODUCT,
+                fxx=0,
+                save_dir=cache_dir,
+                verbose=False,
+            )
             inv = h.inventory()
             if inv is not None and len(inv) > 0:
                 return h
-        except Exception:
-            continue
-    raise RuntimeError(f"No RAP f00 cycle found in the past {max_lookback_hours} hours")
+            errors.append(f"{dt:%Y-%m-%d %HZ}: inventory was empty")
+        except Exception as exc:
+            errors.append(f"{dt:%Y-%m-%d %HZ}: {type(exc).__name__}: {exc}")
+
+    detail = errors[-1] if errors else "no additional error information"
+    raise RuntimeError(
+        f"No RAP f00 {RAP_PRESSURE_PRODUCT} cycle found in the past "
+        f"{max_lookback_hours} hours. Last attempt: {detail}"
+    )
 
 
 def download_latest_rap(cache_dir: str | Path = "cache") -> tuple[Path, dict]:
-    """Download the latest available RAP f00 pressure-level file."""
-    h = latest_rap_f00()
-    path = Path(h.download(save_dir=cache_dir))
+    """Download the latest available RAP f00 13-km pressure-level file."""
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    h = latest_rap_f00(cache_dir=cache_dir)
+    path = Path(h.download(save_dir=cache_dir, errors="raise"))
     meta = {
         "model": "RAP",
-        "product": "prs",
+        "product": RAP_PRESSURE_PRODUCT,
         "forecast_hour": 0,
         "cycle_time_utc": h.date.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "source": str(getattr(h, "SOURCES", "Herbie")),
+        "source": str(getattr(h, "grib_source", getattr(h, "grib", "Herbie"))),
     }
     return path, meta
 
