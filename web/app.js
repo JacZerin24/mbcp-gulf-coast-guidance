@@ -39,6 +39,18 @@ function refreshMapSize() {
   });
 }
 
+function setSidebarStatus(message, isError = false) {
+  let status = document.getElementById('status-message');
+  if (!status) {
+    const aside = document.querySelector('aside');
+    status = document.createElement('div');
+    status.id = 'status-message';
+    aside.insertBefore(status, aside.firstChild);
+  }
+  status.className = isError ? 'status error' : 'status ok';
+  status.textContent = message;
+}
+
 async function setLayer(kind) {
   if (activeLayer) activeLayer.remove();
   const file = kind === 'probability' ? latestMeta.probability_contours : latestMeta.index_contours;
@@ -70,10 +82,20 @@ async function main() {
   try {
     latestMeta = await loadJson('data/latest.json');
     const cycle = latestMeta.cycle?.cycle_time_utc || 'unknown cycle';
+
+    if (latestMeta.status === 'error') {
+      document.getElementById('subtitle').textContent = `${latestMeta.product} | RAP generation failed`;
+      setSidebarStatus(`RAP generation failed: ${latestMeta.error_message || 'unknown error'}`, true);
+      refreshMapSize();
+      return;
+    }
+
     document.getElementById('subtitle').textContent = `${latestMeta.product} | RAP cycle: ${cycle}`;
+    setSidebarStatus(`Latest RAP cycle: ${cycle}`);
     await setLayer('index');
   } catch (err) {
     document.getElementById('subtitle').textContent = `No current data available: ${err.message}`;
+    setSidebarStatus(`No current data available: ${err.message}`, true);
     console.error(err);
     refreshMapSize();
   }
