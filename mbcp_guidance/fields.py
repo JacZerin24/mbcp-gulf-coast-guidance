@@ -83,15 +83,36 @@ def _thetae_deficit(ds: xr.Dataset) -> xr.DataArray:
 
     dewpoint = dewpoint_from_relative_humidity(temp_k, rh)
     thetae = equivalent_potential_temperature(pressure, temp_k, dewpoint)
-    thetae_da = xr.DataArray(
-        np.asarray(thetae.magnitude),
-        dims=ds["t"].dims,
-        coords=ds["t"].coords,
-        name="thetae_k",
-    )
 
-    low = thetae_da.sel({lev: [p for p in thetae_da[lev].values if 850 <= p <= 1000]}).max(lev)
-    mid = thetae_da.sel({lev: [p for p in thetae_da[lev].values if 500 <= p <= 700]}).min(lev)
+    # MetPy can return either a pint Quantity or an xarray DataArray backed by
+    # a pint Quantity. Preserve xarray dimensions/coordinates when available.
+    if isinstance(thetae, xr.DataArray):
+        try:
+            thetae_da = thetae.metpy.dequantify().astype(float)
+        except (AttributeError, TypeError, ValueError):
+            data = getattr(thetae.data, "magnitude", thetae.data)
+            thetae_da = xr.DataArray(
+                np.asarray(data, dtype=float),
+                dims=thetae.dims,
+                coords=thetae.coords,
+            )
+        thetae_da = thetae_da.rename("thetae_k")
+    else:
+        data = getattr(thetae, "magnitude", thetae)
+        thetae_da = xr.DataArray(
+            np.asarray(data, dtype=float),
+            dims=ds["t"].dims,
+            coords=ds["t"].coords,
+            name="thetae_k",
+        )
+
+    low_levels = [p for p in thetae_da[lev].values if 850 <= p <= 1000]
+    mid_levels = [p for p in thetae_da[lev].values if 500 <= p <= 700]
+    if not low_levels or not mid_levels:
+        raise ValueError("RAP pressure levels needed for theta-e deficit were not available")
+
+    low = thetae_da.sel({lev: low_levels}).max(lev)
+    mid = thetae_da.sel({lev: mid_levels}).min(lev)
     return (low - mid).rename("thetae_deficit_k")
 
 
@@ -165,7 +186,6 @@ def calculate_environmental_fields(datasets: list[xr.Dataset], bbox: dict) -> di
         name="dcape_jkg",
     )
 
-    lat_name = "latitude" if "latitude" in template.coords else "lat"
     lon_name = "longitude" if "longitude" in template.coords else "lon"
     for key, da in list(fields.items()):
         if lon_name in da.coords:
