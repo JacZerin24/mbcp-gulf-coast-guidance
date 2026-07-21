@@ -70,10 +70,20 @@ jobs:
           retention-days: 7
 
       - name: Commit updated web data
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "Update RAP guidance web data"
-          file_pattern: "web/data web/assets"
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A web/data web/assets
+
+          if git diff --cached --quiet; then
+            echo "No web-data changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Update RAP guidance web data"
+          git pull --rebase origin main
+          git push origin HEAD:main
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
