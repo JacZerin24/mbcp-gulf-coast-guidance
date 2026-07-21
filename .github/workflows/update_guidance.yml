@@ -33,8 +33,11 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: Check out repository
+      - name: Check out latest main branch
         uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -82,7 +85,12 @@ jobs:
           fi
 
           git commit -m "Update RAP guidance web data"
-          git pull --rebase origin main
+
+          # Another queued run or a manual repository edit may have advanced main.
+          # Rebase the generated-output commit onto the newest main and prefer the
+          # newly generated web files if those same files changed upstream.
+          git fetch origin main
+          git rebase -X theirs origin/main
           git push origin HEAD:main
 
       - name: Configure Pages
