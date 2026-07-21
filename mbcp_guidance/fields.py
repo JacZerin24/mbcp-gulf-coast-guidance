@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import numpy as np
 import xarray as xr
-from metpy.calc import dewpoint_from_relative_humidity, equivalent_potential_temperature
+from metpy.calc import (
+    dewpoint_from_relative_humidity,
+    downdraft_cape,
+    equivalent_potential_temperature,
+)
 from metpy.units import units
 
 from .rap import find_field, find_isobaric_dataset, standardize_lon, subset_domain
@@ -116,6 +120,81 @@ def _thetae_deficit(ds: xr.Dataset) -> xr.DataArray:
     return (low - mid).rename("thetae_deficit_k")
 
 
+def _dcape_profile_value(
+    temperature_profile: np.ndarray,
+    rh_profile: np.ndarray,
+    pressure_hpa: np.ndarray,
+) -> float:
+    """Calculate DCAPE for one RAP gridpoint pressure profile."""
+    temperature = np.asarray(temperature_profile, dtype=float)
+    relative_humidity = np.asarray(rh_profile, dtype=float)
+    pressure = np.asarray(pressure_hpa, dtype=float)
+
+    valid = np.isfinite(temperature) & np.isfinite(relative_humidity) & np.isfinite(pressure)
+    if valid.sum() < 5:
+        return np.nan
+
+    temperature = temperature[valid]
+    relative_humidity = relative_humidity[valid]
+    pressure = pressure[valid]
+
+    # MetPy sounding calculations expect pressure ordered from high to low.
+    order = np.argsort(pressure)[::-1]
+    pressure = pressure[order]
+    temperature = temperature[order]
+    relative_humidity = relative_humidity[order]
+
+    # DCAPE needs a low-level parcel path and the 700-500-hPa source layer.
+    if pressure.max() < 850 or pressure.min() > 700:
+        return np.nan
+
+    if np.nanmax(temperature) < 150:
+        temperature = temperature + 273.15
+
+    if np.nanmax(relative_humidity) > 1.5:
+        relative_humidity = relative_humidity / 100.0
+    relative_humidity = np.clip(relative_humidity, 0.01, 1.0)
+
+    try:
+        temp_quantity = temperature * units.kelvin
+        rh_quantity = relative_humidity * units.dimensionless
+        dewpoint = dewpoint_from_relative_humidity(temp_quantity, rh_quantity)
+        dcape, _, _ = downdraft_cape(pressure * units.hPa, temp_quantity, dewpoint)
+        return float(dcape.to("joule / kilogram").magnitude)
+    except Exception:
+        # Some individual gridpoints can contain below-ground or otherwise
+        # incomplete profiles. Keep those points missing without aborting the map.
+        return np.nan
+
+
+def _dcape_from_pressure_profiles(ds: xr.Dataset) -> xr.DataArray:
+    """Calculate a gridded DCAPE field from RAP temperature/RH profiles."""
+    lev = _pressure_coord(ds)
+    if "t" not in ds.data_vars or "r" not in ds.data_vars:
+        raise ValueError("Temperature and relative humidity profiles are required for DCAPE")
+
+    levels = [float(p) for p in ds[lev].values if 500 <= float(p) <= 1000]
+    if len(levels) < 5:
+        raise ValueError("Insufficient RAP pressure levels between 1000 and 500 hPa for DCAPE")
+
+    temperature = ds["t"].sel({lev: levels})
+    relative_humidity = ds["r"].sel({lev: levels})
+    pressure_hpa = np.asarray(levels, dtype=float)
+
+    dcape = xr.apply_ufunc(
+        _dcape_profile_value,
+        temperature,
+        relative_humidity,
+        input_core_dims=[[lev], [lev]],
+        output_core_dims=[[]],
+        vectorize=True,
+        dask="parallelized",
+        output_dtypes=[float],
+        kwargs={"pressure_hpa": pressure_hpa},
+    )
+    return dcape.rename("dcape_jkg")
+
+
 def _diagnostic_or_nan(
     datasets: list[xr.Dataset],
     bbox: dict,
@@ -142,9 +221,9 @@ def _diagnostic_or_nan(
 def calculate_environmental_fields(datasets: list[xr.Dataset], bbox: dict) -> dict[str, xr.DataArray]:
     """Calculate gridded fields required by the refined model.
 
-    This is the full-gridded prototype. It calculates the simple pressure-level terms directly
-    from the RAP pressure-level grid and uses RAP diagnostic fields for CAPE/LI/DCAPE when those
-    are available in the decoded GRIB groups.
+    This is the full-gridded prototype. It calculates pressure-level terms directly
+    from RAP and uses native diagnostic fields where available. If RAP does not
+    provide a decoded DCAPE diagnostic, DCAPE is calculated from each pressure profile.
     """
     iso = subset_domain(find_isobaric_dataset(datasets), bbox)
 
@@ -178,13 +257,21 @@ def calculate_environmental_fields(datasets: list[xr.Dataset], bbox: dict) -> di
         template=template,
         name="sbli_c",
     )
-    fields["dcape_jkg"] = _diagnostic_or_nan(
+
+    native_dcape = _diagnostic_or_nan(
         datasets,
         bbox,
         candidates=["dcape", "downdraft cape"],
         template=template,
         name="dcape_jkg",
     )
+    if bool(native_dcape.isnull().all()):
+        native_dcape = _dcape_from_pressure_profiles(iso)
+        try:
+            native_dcape = native_dcape.interp_like(template)
+        except Exception:
+            pass
+    fields["dcape_jkg"] = native_dcape.rename("dcape_jkg")
 
     lon_name = "longitude" if "longitude" in template.coords else "lon"
     for key, da in list(fields.items()):
