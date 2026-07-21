@@ -1,4 +1,7 @@
-const map = L.map('map').setView([30.15, -89.9], 8);
+const map = L.map('map', {
+  zoomControl: true,
+  preferCanvas: true
+}).setView([30.15, -89.9], 8);
 
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 10,
@@ -29,6 +32,13 @@ async function loadJson(path) {
   return response.json();
 }
 
+function refreshMapSize() {
+  // Leaflet needs an explicit size recalculation after CSS/grid layout settles.
+  window.requestAnimationFrame(() => {
+    map.invalidateSize(true);
+  });
+}
+
 async function setLayer(kind) {
   if (activeLayer) activeLayer.remove();
   const file = kind === 'probability' ? latestMeta.probability_contours : latestMeta.index_contours;
@@ -45,10 +55,18 @@ async function setLayer(kind) {
       layer.bindPopup(`<strong>${title}</strong>`);
     }
   }).addTo(map);
-  try { map.fitBounds(activeLayer.getBounds(), { padding: [10, 10] }); } catch (_) {}
+
+  refreshMapSize();
+  try {
+    const bounds = activeLayer.getBounds();
+    if (bounds.isValid()) {
+      map.fitBounds(bounds, { padding: [12, 12], maxZoom: 9 });
+    }
+  } catch (_) {}
 }
 
 async function main() {
+  refreshMapSize();
   try {
     latestMeta = await loadJson('data/latest.json');
     const cycle = latestMeta.cycle?.cycle_time_utc || 'unknown cycle';
@@ -57,11 +75,18 @@ async function main() {
   } catch (err) {
     document.getElementById('subtitle').textContent = `No current data available: ${err.message}`;
     console.error(err);
+    refreshMapSize();
   }
 }
 
 document.querySelectorAll('input[name="layer"]').forEach(input => {
   input.addEventListener('change', event => setLayer(event.target.value));
+});
+
+window.addEventListener('resize', refreshMapSize);
+window.addEventListener('load', () => {
+  refreshMapSize();
+  setTimeout(refreshMapSize, 250);
 });
 
 main();
