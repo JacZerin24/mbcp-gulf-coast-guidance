@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Experimental Gulf Coast Damaging Wind Index</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIINfQYERl8tMecqfDz1dYJxgwfNq0wUX8=" crossorigin="" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Experimental Gulf Coast Damaging Wind Index</h1>
+      <p id="subtitle">Loading latest RAP-based guidance...</p>
+    </div>
+    <div class="badge">Research prototype</div>
+  </header>
+
+  <main>
+    <section id="map"></section>
+    <aside>
+      <h2>Layer</h2>
+      <label><input type="radio" name="layer" value="index" checked /> 0-10 Index</label>
+      <label><input type="radio" name="layer" value="probability" /> Probability</label>
+
+      <h2>Interpretation</h2>
+      <ul>
+        <li><strong>0-2:</strong> low conditional signal</li>
+        <li><strong>3-5:</strong> conditional/elevated</li>
+        <li><strong>6-8:</strong> favorable</li>
+        <li><strong>9-10:</strong> strongly favorable</li>
+      </ul>
+
+      <h2>Important caveat</h2>
+      <p>This is conditional environmental guidance. It does not forecast storm initiation and is not official NWS guidance.</p>
+
+      <h2>Latest static image</h2>
+      <a href="assets/latest_index.png" target="_blank" rel="noreferrer">Open latest PNG</a>
+    </aside>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="app.js"></script>
+</body>
+</html>

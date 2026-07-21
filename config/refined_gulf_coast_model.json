@@ -1,0 +1,63 @@
+{
+  "name": "refined_gulf_coast_greedy",
+  "version": "prototype-2026-07",
+  "description": "Experimental logistic model trained on Gulf Coast warm-season damaging-wind and null-convection cases. Coefficients are standardized and should be used with the means/stds in this file.",
+  "target": "conditional damaging convective wind probability",
+  "intercept": 0.809,
+  "probability_to_index": {
+    "method": "round_probability_times_10",
+    "min_index": 0,
+    "max_index": 10
+  },
+  "variables": {
+    "vertical_totals_850_500_c": {
+      "mean": 25.81,
+      "std": 1.72,
+      "coefficient": 1.522,
+      "units": "degC",
+      "description": "850-500 mb vertical totals temperature difference"
+    },
+    "mlcape_jkg": {
+      "mean": 2036.0,
+      "std": 786.0,
+      "coefficient": 0.678,
+      "units": "J kg-1",
+      "description": "mixed-layer CAPE"
+    },
+    "sbli_c": {
+      "mean": -6.08,
+      "std": 1.93,
+      "coefficient": 0.072,
+      "units": "degC",
+      "description": "surface-based lifted index"
+    },
+    "mid_level_lapse_rate_c_km": {
+      "mean": 5.73,
+      "std": 0.47,
+      "coefficient": 0.334,
+      "units": "degC km-1",
+      "description": "mid-level lapse rate, prototype calculation from pressure levels"
+    },
+    "sfc_3km_lapse_rate_c_km": {
+      "mean": 7.30,
+      "std": 0.76,
+      "coefficient": 0.460,
+      "units": "degC km-1",
+      "description": "surface to 3 km lapse rate, prototype calculation from pressure levels"
+    },
+    "dcape_jkg": {
+      "mean": 1118.0,
+      "std": 290.0,
+      "coefficient": -0.055,
+      "units": "J kg-1",
+      "description": "downdraft CAPE"
+    },
+    "thetae_deficit_k": {
+      "mean": 28.97,
+      "std": 5.41,
+      "coefficient": 0.385,
+      "units": "K",
+      "description": "low-level to mid-level theta-e deficit"
+    }
+  }
+}

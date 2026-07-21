@@ -1,0 +1,14 @@
+name: LIX Gulf Coast domain
+bbox:
+  west: -92.4
+  east: -87.6
+  south: 28.3
+  north: 31.8
+plot:
+  title: Experimental Gulf Coast Damaging Wind Index
+  cities:
+    - {name: New Orleans, lat: 29.9511, lon: -90.0715}
+    - {name: Baton Rouge, lat: 30.4515, lon: -91.1871}
+    - {name: Slidell, lat: 30.2752, lon: -89.7812}
+    - {name: Gulfport, lat: 30.3674, lon: -89.0928}
+    - {name: Hattiesburg, lat: 31.3271, lon: -89.2903}
