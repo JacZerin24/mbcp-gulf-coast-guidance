@@ -51,7 +51,7 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Update RAP guidance web data"
-          file_pattern: "web/data/*.json web/data/*.geojson web/assets/*.png"
+          file_pattern: "web/data/*.json web/data/*.geojson web/data/*.txt web/assets/*.png"
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
