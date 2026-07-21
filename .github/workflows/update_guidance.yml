@@ -45,13 +45,16 @@ jobs:
 
       - name: Generate latest RAP guidance
         run: |
-          python scripts/run_guidance.py --output-dir web/data --asset-dir web/assets
+          PYTHONPATH=. python scripts/run_guidance.py \
+            --output-dir web/data \
+            --asset-dir web/assets \
+            --fail-on-error
 
       - name: Commit updated web data
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Update RAP guidance web data"
-          file_pattern: "web/data/*.json web/data/*.geojson web/data/*.txt web/assets/*.png"
+          file_pattern: "web/data web/assets"
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
