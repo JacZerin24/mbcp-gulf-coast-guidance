@@ -6,15 +6,13 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
-from mbcp_guidance.config import load_json, load_yaml, repo_root
-from mbcp_guidance.fields import calculate_environmental_fields
-from mbcp_guidance.model import apply_refined_model
-from mbcp_guidance.output import write_contours, write_latest_json, write_png
-from mbcp_guidance.rap import download_latest_rap, open_grib_datasets
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
 
 
 def parse_args():
-    root = repo_root()
+    root = _repo_root()
     p = argparse.ArgumentParser(description="Generate experimental RAP-based Gulf Coast MBCP guidance")
     p.add_argument("--grib", type=Path, help="Optional local RAP GRIB2 file. If omitted, latest RAP f00 is downloaded.")
     p.add_argument("--output-dir", type=Path, default=root / "web" / "data")
@@ -33,8 +31,9 @@ def parse_args():
 def write_error_outputs(output_dir: Path, asset_dir: Path, err: BaseException) -> None:
     """Write a web-readable error status without deleting existing contours/images.
 
-    This keeps GitHub Pages deployable even when the RAP download, GRIB decoding, or
-    derived-field calculation fails. It also preserves a traceback for debugging.
+    This keeps GitHub Pages deployable even when the RAP download, GRIB decoding,
+    derived-field calculation, or dependency import fails. It also preserves a
+    traceback for debugging.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     asset_dir.mkdir(parents=True, exist_ok=True)
@@ -66,6 +65,14 @@ def write_error_outputs(output_dir: Path, asset_dir: Path, err: BaseException) -
 
 
 def generate_guidance(args) -> None:
+    # Import project/science modules inside the protected block so dependency or
+    # GRIB-library startup failures are caught and written to web/data/latest.json.
+    from mbcp_guidance.config import load_json, load_yaml
+    from mbcp_guidance.fields import calculate_environmental_fields
+    from mbcp_guidance.model import apply_refined_model
+    from mbcp_guidance.output import write_contours, write_latest_json, write_png
+    from mbcp_guidance.rap import download_latest_rap, open_grib_datasets
+
     domain_cfg = load_yaml(args.domain)
     model_cfg = load_json(args.model)
     bbox = domain_cfg["bbox"]
