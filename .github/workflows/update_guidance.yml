@@ -72,7 +72,23 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Commit updated web data
+      # Deploy directly from the generated workspace. A repository push is not
+      # required for GitHub Pages to receive the newest RAP guidance.
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      # Keep generated files in the repository when possible, but never allow a
+      # push/rebase issue to block the already completed Pages deployment.
+      - name: Optionally commit updated web data
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
@@ -85,25 +101,18 @@ jobs:
           fi
 
           git commit -m "Update RAP guidance web data"
-
-          # Another queued run or a manual repository edit may have advanced main.
-          # Rebase the generated-output commit onto the newest main and prefer the
-          # newly generated web files if those same files changed upstream.
           git fetch origin main
-          git rebase -X theirs origin/main
-          git push origin HEAD:main
 
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
+          if ! git rebase -X theirs origin/main; then
+            echo "Could not rebase generated output onto the newest main branch; Pages was already deployed."
+            git rebase --abort || true
+            exit 0
+          fi
 
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: web
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          if ! git push origin HEAD:main; then
+            echo "Could not push generated output to main; Pages was already deployed."
+            exit 0
+          fi
 
       - name: Mark failed guidance generation
         if: steps.guidance.outcome == 'failure'
