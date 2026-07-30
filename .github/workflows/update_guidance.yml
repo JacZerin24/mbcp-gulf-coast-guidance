@@ -11,10 +11,10 @@ on:
       - "requirements.txt"
       - ".github/workflows/update_guidance.yml"
   schedule:
-    # Poll every 15 minutes because the newest hourly RAP analysis does not
-    # become available at one exact minute each hour. GitHub schedules are
-    # approximate, so stagger checks away from the top of the hour.
-    - cron: "2,17,32,47 * * * *"
+    # Poll every five minutes so a newly available hourly RAP analysis is
+    # detected quickly. GitHub schedules are approximate, so checks are
+    # staggered away from the top of the hour.
+    - cron: "3,8,13,18,23,28,33,38,43,48,53,58 * * * *"
 
 permissions:
   contents: read
