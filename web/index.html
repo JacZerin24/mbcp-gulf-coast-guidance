@@ -3,43 +3,74 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Experimental Gulf Coast Damaging Wind Index</title>
+  <title>Experimental Gulf Coast Damaging Wind Guidance</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
-  <link rel="stylesheet" href="style.css?v=3" />
+  <link rel="stylesheet" href="style.css?v=4" />
 </head>
 <body>
   <header>
     <div>
-      <h1>Experimental Gulf Coast Damaging Wind Index</h1>
+      <h1>Experimental Gulf Coast Damaging Wind Guidance</h1>
       <p id="subtitle">Loading latest RAP-based guidance...</p>
     </div>
     <div class="badge">Research prototype</div>
   </header>
 
   <main>
-    <section id="map"></section>
+    <section id="map" aria-label="Interactive RAP damaging-wind guidance map"></section>
     <aside>
-      <h2>Layer</h2>
-      <label><input type="radio" name="layer" value="index" checked /> 0-10 Index</label>
-      <label><input type="radio" name="layer" value="probability" /> Probability</label>
+      <section class="control-section">
+        <h2>Displayed layer</h2>
+        <label class="layer-choice">
+          <input type="radio" name="layer" value="index" checked />
+          <span><strong>0–10 Index</strong><small>Simple favorability scale</small></span>
+        </label>
+        <label class="layer-choice">
+          <input type="radio" name="layer" value="probability" />
+          <span><strong>Probability</strong><small>Conditional model probability</small></span>
+        </label>
+        <p id="layer-description" class="helper-text">A simplified 0–10 presentation of conditional damaging-wind favorability.</p>
+      </section>
 
-      <h2>Interpretation</h2>
-      <ul>
-        <li><strong>0-2:</strong> low conditional signal</li>
-        <li><strong>3-5:</strong> conditional/elevated</li>
-        <li><strong>6-8:</strong> favorable</li>
-        <li><strong>9-10:</strong> strongly favorable</li>
-      </ul>
+      <section class="control-section">
+        <div class="section-heading-row">
+          <h2>Overlay opacity</h2>
+          <span id="opacity-value">74%</span>
+        </div>
+        <input id="overlay-opacity" type="range" min="35" max="95" value="74" step="1" aria-label="Guidance overlay opacity" />
+      </section>
 
-      <h2>Important caveat</h2>
-      <p>This is conditional environmental guidance. It does not forecast storm initiation and is not official NWS guidance.</p>
+      <section class="control-section">
+        <h2>Index interpretation</h2>
+        <ul class="interpretation-list">
+          <li><strong>0–2:</strong> low conditional signal</li>
+          <li><strong>3–5:</strong> conditional/elevated</li>
+          <li><strong>6–8:</strong> favorable</li>
+          <li><strong>9–10:</strong> strongly favorable</li>
+        </ul>
+      </section>
 
-      <h2>Latest static image</h2>
-      <a id="latest-image-link" href="assets/latest_index.png" target="_blank" rel="noreferrer">Open latest PNG</a>
+      <section class="control-section note-card">
+        <h2>Visualization note</h2>
+        <p>Light smoothing is applied only to the rendered map and images to reduce grid-cell blockiness. The underlying model calculation is unchanged.</p>
+      </section>
+
+      <section class="control-section caveat-card">
+        <h2>Important caveat</h2>
+        <p>This is conditional environmental guidance. It does not forecast thunderstorm initiation and is not official NWS guidance.</p>
+      </section>
+
+      <section class="control-section">
+        <h2>Latest static maps</h2>
+        <div class="download-links">
+          <a id="latest-index-link" href="assets/latest_index.png" target="_blank" rel="noreferrer">Index PNG</a>
+          <a id="latest-probability-link" href="assets/latest_probability.png" target="_blank" rel="noreferrer">Probability PNG</a>
+        </div>
+      </section>
     </aside>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

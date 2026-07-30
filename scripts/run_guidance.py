@@ -29,20 +29,13 @@ def parse_args():
 
 
 def write_error_outputs(output_dir: Path, asset_dir: Path, err: BaseException) -> None:
-    """Write a web-readable error status without deleting existing contours/images.
-
-    This keeps GitHub Pages deployable even when the RAP download, GRIB decoding,
-    derived-field calculation, or dependency import fails. It also preserves a
-    traceback for debugging.
-    """
     output_dir.mkdir(parents=True, exist_ok=True)
     asset_dir.mkdir(parents=True, exist_ok=True)
-
     tb = traceback.format_exc()
     (output_dir / "guidance_error.txt").write_text(tb, encoding="utf-8")
-
     payload = {
         "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "display_version": 2,
         "status": "error",
         "error_message": str(err),
         "error_log": "guidance_error.txt",
@@ -56,21 +49,29 @@ def write_error_outputs(output_dir: Path, asset_dir: Path, err: BaseException) -
         "product": "Experimental Gulf Coast Conditional Damaging Wind Index",
         "index_contours": "index_contours.geojson",
         "probability_contours": "probability_contours.geojson",
+        "image": "assets/latest_index.png",
+        "images": {
+            "index": "assets/latest_index.png",
+            "probability": "assets/latest_probability.png",
+        },
         "disclaimer": "Experimental/research guidance only. Not official NWS operational guidance.",
     }
     (output_dir / "latest.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
-
     print("RAP guidance generation failed, but wrote web error outputs.")
     print(tb)
 
 
 def generate_guidance(args) -> None:
-    # Import project/science modules inside the protected block so dependency or
-    # GRIB-library startup failures are caught and written to web/data/latest.json.
     from mbcp_guidance.config import load_json, load_yaml
     from mbcp_guidance.fields import calculate_environmental_fields
     from mbcp_guidance.model import apply_refined_model
-    from mbcp_guidance.output import write_contours, write_latest_json, write_png
+    from mbcp_guidance.output import (
+        smooth_display_field,
+        write_contours,
+        write_latest_json,
+        write_map_png,
+        write_raster_overlay,
+    )
     from mbcp_guidance.rap import download_latest_rap, open_grib_datasets
 
     domain_cfg = load_yaml(args.domain)
@@ -91,43 +92,53 @@ def generate_guidance(args) -> None:
 
     print(f"Opening RAP file: {grib_path}")
     datasets = open_grib_datasets(grib_path)
-
     print("Calculating gridded environmental fields...")
     fields = calculate_environmental_fields(datasets, bbox)
-
     print("Applying refined Gulf Coast logistic model...")
     probability, index = apply_refined_model(fields, model_cfg)
+
+    index_display = smooth_display_field(index.clip(min=0, max=10), sigma=1.0).clip(min=0, max=10)
+    probability_display = smooth_display_field((probability * 100).clip(min=0, max=100), sigma=1.0).clip(min=0, max=100)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     args.asset_dir.mkdir(parents=True, exist_ok=True)
 
-    print("Writing web data outputs...")
+    print("Writing smoother compatibility contours...")
     write_contours(
-        index,
-        levels=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        index_display,
+        levels=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
         output_path=args.output_dir / "index_contours.geojson",
         name="Experimental 0-10 Index",
         unit="index",
+        kind="index",
     )
     write_contours(
-        probability * 100,
-        levels=[0, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+        probability_display,
+        levels=[5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
         output_path=args.output_dir / "probability_contours.geojson",
-        name="Damaging Wind Probability",
+        name="Conditional Damaging Wind Probability",
         unit="percent",
+        kind="probability",
     )
-    write_png(
-        index,
-        output_path=args.asset_dir / "latest_index.png",
-        title=f"{domain_cfg['plot']['title']} - {cycle_meta.get('cycle_time_utc', 'unknown cycle')}",
-    )
-    write_latest_json(args.output_dir / "latest.json", cycle_meta)
 
-    # Remove old error log after a successful run so the web data directory reflects current status.
+    print("Writing transparent Leaflet raster overlays...")
+    index_layer = write_raster_overlay(index_display, args.asset_dir / "index_overlay.png", "index")
+    probability_layer = write_raster_overlay(probability_display, args.asset_dir / "probability_overlay.png", "probability")
+
+    cycle_time = cycle_meta.get("cycle_time_utc", "unknown cycle")
+    print("Writing polished static maps...")
+    write_map_png(index_display, args.asset_dir / "latest_index.png", "index", cycle_time)
+    write_map_png(probability_display, args.asset_dir / "latest_probability.png", "probability", cycle_time)
+
+    write_latest_json(
+        args.output_dir / "latest.json",
+        cycle_meta,
+        layers={"index": index_layer, "probability": probability_layer},
+    )
+
     error_log = args.output_dir / "guidance_error.txt"
     if error_log.exists():
         error_log.unlink()
-
     print("Done.")
 
 
