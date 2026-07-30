@@ -83,6 +83,7 @@ def write_latest_json(
     cycle_meta: dict,
     index_file: str = "index_contours.geojson",
     probability_file: str = "probability_contours.geojson",
+    image_file: str = "assets/latest_index.png",
 ):
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -92,6 +93,7 @@ def write_latest_json(
         "product": "Experimental Gulf Coast Conditional Damaging Wind Index",
         "index_contours": index_file,
         "probability_contours": probability_file,
+        "image": image_file,
         "disclaimer": "Experimental/research guidance only. Not official NWS operational guidance.",
     }
     output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
