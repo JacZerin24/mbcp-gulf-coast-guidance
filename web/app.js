@@ -11,6 +11,7 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 }).addTo(map);
 
 let activeLayer;
+let activeLayerVersion;
 let activeKind = 'index';
 let latestMeta;
 let latestVersion;
@@ -97,6 +98,7 @@ async function setLayer(kind, { fitBounds = false } = {}) {
 
   if (activeLayer) activeLayer.remove();
   activeLayer = newLayer.addTo(map);
+  activeLayerVersion = latestVersion;
 
   refreshMapSize();
   if (fitBounds) {
@@ -133,7 +135,7 @@ async function refreshGuidance({ initial = false } = {}) {
     document.getElementById('subtitle').textContent = `${metadata.product} | RAP cycle: ${cycle}`;
     setSidebarStatus(`Latest RAP cycle: ${cycle} | Automatically checking for updates`);
 
-    if (initial || changed || !activeLayer) {
+    if (initial || changed || !activeLayer || activeLayerVersion !== version) {
       latestVersion = version;
       await setLayer(activeKind, { fitBounds: initial && !activeLayer });
     } else {
