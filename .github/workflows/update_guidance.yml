@@ -62,11 +62,15 @@ jobs:
         if: github.event_name == 'schedule'
         shell: bash
         env:
-          PUBLISHED_METADATA_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data/latest.json
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          REPOSITORY_FULL_NAME: ${{ github.repository }}
         run: |
+          repo_name="${REPOSITORY_FULL_NAME#*/}"
+          published_url="https://${REPOSITORY_OWNER}.github.io/${repo_name}/data/latest.json"
+
           set +e
           PYTHONPATH=. python scripts/wait_for_new_rap.py \
-            --published-url "$PUBLISHED_METADATA_URL" \
+            --published-url "$published_url" \
             --poll-seconds 120 \
             --max-wait-minutes 24 \
             --cache-dir cache
