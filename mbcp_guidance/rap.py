@@ -10,41 +10,52 @@ import xarray as xr
 RAP_PRESSURE_PRODUCT = "awp130pgrb"
 
 
-def latest_rap_f00(max_lookback_hours: int = 12, cache_dir: str | Path = "cache"):
-    """Return the newest available 0-hr 13-km RAP pressure-level analysis."""
-    from herbie import Herbie
+def current_valid_hour_utc(now: datetime | None = None) -> datetime:
+    """Return the current UTC hour as a timezone-naive datetime for Herbie."""
+    if now is None:
+        now = datetime.now(timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    else:
+        now = now.astimezone(timezone.utc)
 
-    cache_dir = Path(cache_dir)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-
-    # Herbie/pandas currently expects a timezone-naive datetime representing UTC.
-    # Passing an aware UTC datetime can trigger "Cannot compare tz-naive and
-    # tz-aware timestamps" while Herbie checks model availability.
-    now = datetime.now(timezone.utc).replace(
+    return now.replace(
         tzinfo=None,
         minute=0,
         second=0,
         microsecond=0,
     )
+
+
+def latest_rap_f00(max_lookback_hours: int = 12, cache_dir: str | Path = "cache"):
+    """Return the newest available 0-hour 13-km RAP pressure-level analysis."""
+    from herbie import Herbie
+
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    now = current_valid_hour_utc()
     errors: list[str] = []
 
     for hours_back in range(max_lookback_hours + 1):
-        dt = now - timedelta(hours=hours_back)
+        cycle_dt = now - timedelta(hours=hours_back)
         try:
-            h = Herbie(
-                dt,
+            herbie = Herbie(
+                cycle_dt,
                 model="rap",
                 product=RAP_PRESSURE_PRODUCT,
                 fxx=0,
                 save_dir=cache_dir,
                 verbose=False,
             )
-            inv = h.inventory()
-            if inv is not None and len(inv) > 0:
-                return h
-            errors.append(f"{dt:%Y-%m-%d %HZ}: inventory was empty")
+            inventory = herbie.inventory()
+            if inventory is not None and len(inventory) > 0:
+                return herbie
+            errors.append(f"{cycle_dt:%Y-%m-%d %HZ} f00: inventory was empty")
         except Exception as exc:
-            errors.append(f"{dt:%Y-%m-%d %HZ}: {type(exc).__name__}: {exc}")
+            errors.append(
+                f"{cycle_dt:%Y-%m-%d %HZ} f00: {type(exc).__name__}: {exc}"
+            )
 
     detail = errors[-1] if errors else "no additional error information"
     raise RuntimeError(
@@ -53,19 +64,78 @@ def latest_rap_f00(max_lookback_hours: int = 12, cache_dir: str | Path = "cache"
     )
 
 
-def download_latest_rap(cache_dir: str | Path = "cache") -> tuple[Path, dict]:
-    """Download the latest available RAP f00 13-km pressure-level file."""
+def latest_rap_valid_now(
+    max_lookback_hours: int = 12,
+    cache_dir: str | Path = "cache",
+    valid_hour: datetime | None = None,
+):
+    """Return the preferred RAP product valid at the requested UTC hour.
+
+    Preference is given to the newest possible cycle. For the current 14Z valid
+    hour, the search order is 14Z f00, 13Z f01, 12Z f02, and so on. This keeps
+    the guidance valid for the current hour even when the newest analysis has
+    not arrived yet.
+    """
+    from herbie import Herbie
+
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    h = latest_rap_f00(cache_dir=cache_dir)
-    path = Path(h.download(save_dir=cache_dir, errors="raise"))
+    valid_dt = current_valid_hour_utc(valid_hour)
+    errors: list[str] = []
+
+    for forecast_hour in range(max_lookback_hours + 1):
+        cycle_dt = valid_dt - timedelta(hours=forecast_hour)
+        try:
+            herbie = Herbie(
+                cycle_dt,
+                model="rap",
+                product=RAP_PRESSURE_PRODUCT,
+                fxx=forecast_hour,
+                save_dir=cache_dir,
+                verbose=False,
+            )
+            inventory = herbie.inventory()
+            if inventory is not None and len(inventory) > 0:
+                return herbie, valid_dt
+            errors.append(
+                f"cycle {cycle_dt:%Y-%m-%d %HZ} f{forecast_hour:02d}: "
+                "inventory was empty"
+            )
+        except Exception as exc:
+            errors.append(
+                f"cycle {cycle_dt:%Y-%m-%d %HZ} f{forecast_hour:02d}: "
+                f"{type(exc).__name__}: {exc}"
+            )
+
+    detail = errors[-1] if errors else "no additional error information"
+    raise RuntimeError(
+        f"No RAP {RAP_PRESSURE_PRODUCT} product valid at "
+        f"{valid_dt:%Y-%m-%d %HZ} was found using forecast hours 0 through "
+        f"{max_lookback_hours}. Last attempt: {detail}"
+    )
+
+
+def download_latest_rap(cache_dir: str | Path = "cache") -> tuple[Path, dict]:
+    """Download the preferred RAP pressure-level file valid this UTC hour."""
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    herbie, valid_dt = latest_rap_valid_now(cache_dir=cache_dir)
+    path = Path(herbie.download(save_dir=cache_dir, errors="raise"))
+    forecast_hour = int(getattr(herbie, "fxx", 0))
+    source = getattr(herbie, "grib_source", None) or getattr(
+        herbie, "grib", "Herbie"
+    )
+
     meta = {
         "model": "RAP",
         "product": RAP_PRESSURE_PRODUCT,
-        "forecast_hour": 0,
-        "cycle_time_utc": h.date.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "source": str(getattr(h, "grib_source", getattr(h, "grib", "Herbie"))),
+        "selection_mode": "current_hour_valid",
+        "forecast_hour": forecast_hour,
+        "cycle_time_utc": herbie.date.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "valid_time_utc": valid_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "source": str(source),
     }
     return path, meta
 
@@ -108,7 +178,9 @@ def subset_domain(ds: xr.Dataset | xr.DataArray, bbox: dict):
 def find_isobaric_dataset(datasets: list[xr.Dataset]) -> xr.Dataset:
     """Find a dataset containing pressure-level temperature fields."""
     for ds in datasets:
-        if "isobaricInhPa" in ds.coords and any(v in ds.data_vars for v in ["t", "gh", "r"]):
+        if "isobaricInhPa" in ds.coords and any(
+            variable in ds.data_vars for variable in ["t", "gh", "r"]
+        ):
             return ds
     raise ValueError("Could not find an isobaric pressure-level RAP dataset")
 
@@ -118,17 +190,17 @@ def find_field(datasets: list[xr.Dataset], candidates: list[str]) -> xr.DataArra
 
     This is intentionally forgiving because RAP GRIB short names can vary across products.
     """
-    cand_lower = {c.lower() for c in candidates}
+    candidate_names = {candidate.lower() for candidate in candidates}
     for ds in datasets:
-        for var_name, da in ds.data_vars.items():
-            attrs = da.attrs
+        for variable_name, data_array in ds.data_vars.items():
+            attrs = data_array.attrs
             names = {
-                var_name.lower(),
+                variable_name.lower(),
                 str(attrs.get("GRIB_shortName", "")).lower(),
                 str(attrs.get("GRIB_name", "")).lower(),
                 str(attrs.get("long_name", "")).lower(),
                 str(attrs.get("standard_name", "")).lower(),
             }
-            if names & cand_lower:
-                return da.squeeze(drop=True)
+            if names & candidate_names:
+                return data_array.squeeze(drop=True)
     return None
