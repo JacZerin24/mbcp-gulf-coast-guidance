@@ -51,11 +51,42 @@ function withVersion(path, version) {
   return `${path}${separator}v=${encodeURIComponent(version)}`;
 }
 
+function compactUtc(value) {
+  if (!value || value === 'unknown-local-file' || value === 'not generated') {
+    return value || 'unknown';
+  }
+
+  const match = String(value).match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):/);
+  if (match) return `${match[1]} ${match[2]}Z`;
+  return String(value);
+}
+
+function forecastHour(meta) {
+  const value = Number(meta?.cycle?.forecast_hour ?? 0);
+  return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+}
+
+function rapProduct(meta) {
+  const cycle = compactUtc(meta?.cycle?.cycle_time_utc || 'unknown cycle');
+  const valid = compactUtc(
+    meta?.cycle?.valid_time_utc || meta?.cycle?.cycle_time_utc || 'unknown valid time'
+  );
+  const fhr = forecastHour(meta);
+  return {
+    cycle,
+    valid,
+    fhr,
+    fhrText: `f${String(fhr).padStart(2, '0')}`
+  };
+}
+
 function metadataVersion(meta) {
   const status = meta.status || 'ok';
   const cycle = meta.cycle?.cycle_time_utc || 'unknown-cycle';
+  const valid = meta.cycle?.valid_time_utc || cycle;
+  const fhr = forecastHour(meta);
   const displayVersion = meta.display_version || 1;
-  return `${status}-${cycle}-display-${displayVersion}`;
+  return `${status}-${cycle}-${valid}-f${fhr}-display-${displayVersion}`;
 }
 
 async function loadJson(path) {
@@ -82,15 +113,19 @@ function setSidebarStatus(message, isError = false) {
 
 function updateStaticImageLinks(meta, version) {
   const images = meta.images || { index: meta.image || 'assets/latest_index.png' };
-  const cycle = meta.cycle?.cycle_time_utc || 'unknown cycle';
+  const product = rapProduct(meta);
+  const label = `valid ${product.valid}; ${product.cycle} ${product.fhrText}`;
 
   const indexLink = document.getElementById('latest-index-link');
   indexLink.href = withVersion(images.index || 'assets/latest_index.png', version);
-  indexLink.textContent = `Index PNG (${cycle})`;
+  indexLink.textContent = `Index PNG (${label})`;
 
   const probabilityLink = document.getElementById('latest-probability-link');
-  probabilityLink.href = withVersion(images.probability || 'assets/latest_probability.png', version);
-  probabilityLink.textContent = `Probability PNG (${cycle})`;
+  probabilityLink.href = withVersion(
+    images.probability || 'assets/latest_probability.png',
+    version
+  );
+  probabilityLink.textContent = `Probability PNG (${label})`;
 }
 
 function getLayerMetadata(kind) {
@@ -202,7 +237,9 @@ async function setLayer(kind, { fitBounds = false } = {}) {
   refreshMapSize();
 
   if (fitBounds) {
-    const bounds = layerMeta?.bounds ? L.latLngBounds(layerMeta.bounds) : activeLayer.getBounds?.();
+    const bounds = layerMeta?.bounds
+      ? L.latLngBounds(layerMeta.bounds)
+      : activeLayer.getBounds?.();
     if (bounds?.isValid()) {
       map.fitBounds(bounds, { padding: [16, 16], maxZoom: 8 });
     }
@@ -223,15 +260,32 @@ async function refreshGuidance({ initial = false } = {}) {
 
     if (metadata.status === 'error') {
       document.getElementById('subtitle').textContent = `${metadata.product} | RAP generation failed`;
-      setSidebarStatus(`RAP generation failed: ${metadata.error_message || 'unknown error'}`, true);
+      setSidebarStatus(
+        `RAP generation failed: ${metadata.error_message || 'unknown error'}`,
+        true
+      );
       latestVersion = version;
       refreshMapSize();
       return;
     }
 
-    const cycle = metadata.cycle?.cycle_time_utc || 'unknown cycle';
-    document.getElementById('subtitle').textContent = `${metadata.product} | RAP cycle: ${cycle}`;
-    setSidebarStatus(`Latest RAP cycle: ${cycle} | Checking every 2 minutes for a new deployment`);
+    const product = rapProduct(metadata);
+    document.getElementById('subtitle').textContent =
+      `${metadata.product} | Valid: ${product.valid} | RAP cycle: ` +
+      `${product.cycle} ${product.fhrText}`;
+
+    if (product.fhr === 0) {
+      setSidebarStatus(
+        `Current-hour RAP analysis: ${product.cycle} f00, valid ${product.valid}. ` +
+        'Checking every 2 minutes for a new deployment.'
+      );
+    } else {
+      setSidebarStatus(
+        `Current-hour guidance is using ${product.cycle} ${product.fhrText}, ` +
+        `valid ${product.valid}, while the current-hour f00 analysis is not yet ` +
+        'available. Checking every 2 minutes for a newer preferred product.'
+      );
+    }
 
     if (initial || changed || !activeLayer || activeLayerVersion !== version) {
       latestVersion = version;
@@ -240,7 +294,8 @@ async function refreshGuidance({ initial = false } = {}) {
       latestVersion = version;
     }
   } catch (err) {
-    document.getElementById('subtitle').textContent = `No current data available: ${err.message}`;
+    document.getElementById('subtitle').textContent =
+      `No current data available: ${err.message}`;
     setSidebarStatus(`No current data available: ${err.message}`, true);
     console.error(err);
     refreshMapSize();

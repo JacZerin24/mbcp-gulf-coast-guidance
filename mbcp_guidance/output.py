@@ -132,7 +132,10 @@ def _cmap_norm(kind: str):
 def _masked_values(data: xr.DataArray, kind: str) -> np.ma.MaskedArray:
     style = _style(kind)
     values = np.asarray(data.values, dtype=float)
-    return np.ma.masked_where(~np.isfinite(values) | (values < style["threshold"]), values)
+    return np.ma.masked_where(
+        ~np.isfinite(values) | (values < style["threshold"]),
+        values,
+    )
 
 
 def _legend_entries(kind: str) -> list[dict]:
@@ -176,9 +179,17 @@ def write_contours(
     cmap, norm = _cmap_norm(kind)
 
     fig, ax = plt.subplots(figsize=(8, 6))
-    cs = ax.contourf(lon, lat, values, levels=levels, cmap=cmap, norm=norm, antialiased=True)
+    contours = ax.contourf(
+        lon,
+        lat,
+        values,
+        levels=levels,
+        cmap=cmap,
+        norm=norm,
+        antialiased=True,
+    )
     geojson = geojsoncontour.contourf_to_geojson(
-        contourf=cs,
+        contourf=contours,
         ndigits=3,
         unit=unit,
         stroke_width=0.45,
@@ -229,7 +240,11 @@ def write_raster_overlay(data: xr.DataArray, output_path: str | Path, kind: str)
     height_px = int(np.clip(width_px / projected_ratio, 650, 1300))
     dpi = 100
 
-    fig = plt.figure(figsize=(width_px / dpi, height_px / dpi), dpi=dpi, frameon=False)
+    fig = plt.figure(
+        figsize=(width_px / dpi, height_px / dpi),
+        dpi=dpi,
+        frameon=False,
+    )
     ax = fig.add_axes([0, 0, 1, 1])
     ax.set_xlim(west, east)
     ax.set_ylim(y_south, y_north)
@@ -260,11 +275,30 @@ def write_raster_overlay(data: xr.DataArray, output_path: str | Path, kind: str)
     }
 
 
+def _compact_utc(value: str | None) -> str:
+    if not value or value in {"unknown-local-file", "not generated"}:
+        return value or "unknown"
+
+    text = value.strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return value
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+    return parsed.strftime("%Y-%m-%d %HZ")
+
+
 def write_map_png(
     data: xr.DataArray,
     output_path: str | Path,
     kind: str,
-    cycle_time_utc: str,
+    cycle_meta: dict,
 ):
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -273,6 +307,12 @@ def write_map_png(
     lat, lon = _lat_lon(data)
     values = _masked_values(data, kind)
     cmap, norm = _cmap_norm(kind)
+
+    cycle_time = _compact_utc(cycle_meta.get("cycle_time_utc"))
+    valid_time = _compact_utc(
+        cycle_meta.get("valid_time_utc") or cycle_meta.get("cycle_time_utc")
+    )
+    forecast_hour = int(cycle_meta.get("forecast_hour", 0))
 
     fig = plt.figure(figsize=(12, 8), facecolor="white")
     transform = None
@@ -283,15 +323,48 @@ def write_map_png(
         ax = plt.axes(projection=ccrs.PlateCarree())
         transform = ccrs.PlateCarree()
         ax.set_extent(
-            [float(np.nanmin(lon)), float(np.nanmax(lon)), float(np.nanmin(lat)), float(np.nanmax(lat))],
+            [
+                float(np.nanmin(lon)),
+                float(np.nanmax(lon)),
+                float(np.nanmin(lat)),
+                float(np.nanmax(lat)),
+            ],
             crs=transform,
         )
-        ax.add_feature(cfeature.OCEAN.with_scale("50m"), facecolor="#dceef5", zorder=0)
-        ax.add_feature(cfeature.LAND.with_scale("50m"), facecolor="#f5f4ef", zorder=0)
-        ax.add_feature(cfeature.LAKES.with_scale("50m"), facecolor="#dceef5", edgecolor="#9bbdcc", linewidth=0.4)
-        ax.add_feature(cfeature.COASTLINE.with_scale("50m"), edgecolor="#374151", linewidth=0.75, zorder=5)
-        ax.add_feature(cfeature.STATES.with_scale("50m"), edgecolor="#4b5563", linewidth=0.65, zorder=5)
-        ax.add_feature(cfeature.BORDERS.with_scale("50m"), edgecolor="#6b7280", linewidth=0.5, zorder=5)
+        ax.add_feature(
+            cfeature.OCEAN.with_scale("50m"),
+            facecolor="#dceef5",
+            zorder=0,
+        )
+        ax.add_feature(
+            cfeature.LAND.with_scale("50m"),
+            facecolor="#f5f4ef",
+            zorder=0,
+        )
+        ax.add_feature(
+            cfeature.LAKES.with_scale("50m"),
+            facecolor="#dceef5",
+            edgecolor="#9bbdcc",
+            linewidth=0.4,
+        )
+        ax.add_feature(
+            cfeature.COASTLINE.with_scale("50m"),
+            edgecolor="#374151",
+            linewidth=0.75,
+            zorder=5,
+        )
+        ax.add_feature(
+            cfeature.STATES.with_scale("50m"),
+            edgecolor="#4b5563",
+            linewidth=0.65,
+            zorder=5,
+        )
+        ax.add_feature(
+            cfeature.BORDERS.with_scale("50m"),
+            edgecolor="#6b7280",
+            linewidth=0.5,
+            zorder=5,
+        )
         gridlines = ax.gridlines(
             draw_labels=True,
             linewidth=0.35,
@@ -315,7 +388,7 @@ def write_map_png(
         ax.set_ylabel("Latitude")
 
     plot_levels = np.linspace(style["vmin"], style["vmax"], 46)
-    kwargs = {
+    plot_kwargs = {
         "levels": plot_levels,
         "cmap": cmap,
         "norm": norm,
@@ -324,9 +397,9 @@ def write_map_png(
         "zorder": 2,
     }
     if transform is not None:
-        kwargs["transform"] = transform
+        plot_kwargs["transform"] = transform
 
-    cf = ax.contourf(lon, lat, values, **kwargs)
+    filled_contours = ax.contourf(lon, lat, values, **plot_kwargs)
 
     line_levels = style["ticks"][1:-1]
     line_kwargs = {
@@ -340,23 +413,38 @@ def write_map_png(
         line_kwargs["transform"] = transform
     ax.contour(lon, lat, values, **line_kwargs)
 
-    fig.suptitle(style["title"], fontsize=19, fontweight="semibold", y=0.965, color="#111827")
+    fig.suptitle(
+        style["title"],
+        fontsize=19,
+        fontweight="semibold",
+        y=0.965,
+        color="#111827",
+    )
     ax.set_title(
-        f"RAP f00 cycle: {cycle_time_utc}  |  Conditional environmental guidance",
+        f"Valid: {valid_time}  |  RAP cycle: {cycle_time} f{forecast_hour:02d}  |  "
+        "Conditional environmental guidance",
         fontsize=11,
         color="#4b5563",
         pad=10,
     )
 
-    cbar = fig.colorbar(cf, ax=ax, orientation="horizontal", pad=0.065, shrink=0.84, aspect=38)
-    cbar.set_label(style["label"], fontsize=11)
-    cbar.set_ticks(style["ticks"])
-    cbar.ax.tick_params(labelsize=9)
+    colorbar = fig.colorbar(
+        filled_contours,
+        ax=ax,
+        orientation="horizontal",
+        pad=0.065,
+        shrink=0.84,
+        aspect=38,
+    )
+    colorbar.set_label(style["label"], fontsize=11)
+    colorbar.set_ticks(style["ticks"])
+    colorbar.ax.tick_params(labelsize=9)
 
     fig.text(
         0.5,
         0.018,
-        "Light display smoothing is applied for visualization only. Experimental/research guidance; not official NWS guidance.",
+        "Light display smoothing is applied for visualization only. "
+        "Experimental/research guidance; not official NWS guidance.",
         ha="center",
         va="bottom",
         fontsize=8.5,
@@ -380,7 +468,7 @@ def write_latest_json(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "display_version": 2,
+        "display_version": 3,
         "cycle": cycle_meta,
         "product": "Experimental Gulf Coast Conditional Damaging Wind Index",
         "index_contours": index_file,
@@ -391,7 +479,12 @@ def write_latest_json(
             "probability": probability_image,
         },
         "layers": layers,
-        "display_note": "Light Gaussian smoothing is applied to rendered products only; model calculations are unchanged.",
-        "disclaimer": "Experimental/research guidance only. Not official NWS operational guidance.",
+        "display_note": (
+            "Light Gaussian smoothing is applied to rendered products only; "
+            "model calculations are unchanged."
+        ),
+        "disclaimer": (
+            "Experimental/research guidance only. Not official NWS operational guidance."
+        ),
     }
     output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
