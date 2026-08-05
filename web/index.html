@@ -6,7 +6,7 @@
   <title>Experimental Gulf Coast Damaging Wind Guidance</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css?v=4" />
-  <link rel="stylesheet" href="readout.css?v=1" />
+  <link rel="stylesheet" href="readout.css?v=2" />
 </head>
 <body>
   <header>
@@ -42,18 +42,15 @@
       </section>
 
       <section class="control-section">
-        <h2>Map point readout</h2>
+        <h2>Map hover readout</h2>
         <label class="readout-toggle">
           <input id="readout-toggle" type="checkbox" />
           <span>
-            <strong>Enable click readout</strong>
-            <small>Click the map to sample the nearest RAP grid point.</small>
+            <strong>Enable hover readout</strong>
+            <small>Move the mouse across the map to sample the nearest RAP grid point.</small>
           </span>
         </label>
-        <div id="readout-card" class="readout-card" aria-live="polite"></div>
-        <div class="readout-actions">
-          <button id="clear-readout" type="button" disabled>Clear readout</button>
-        </div>
+        <p id="readout-state" class="helper-text">Enable the option and move the mouse across the map to sample unsmoothed RAP values.</p>
       </section>
 
       <section class="control-section">
@@ -68,7 +65,7 @@
 
       <section class="control-section note-card">
         <h2>Visualization note</h2>
-        <p>Light smoothing is applied only to the rendered map and images to reduce grid-cell blockiness. Point readouts use the unsmoothed model values.</p>
+        <p>Light smoothing is applied only to the rendered map and images to reduce grid-cell blockiness. Hover readouts use the unsmoothed model values.</p>
       </section>
 
       <section class="control-section caveat-card">
@@ -88,6 +85,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js?v=6"></script>
-  <script src="readout.js?v=1"></script>
+  <script src="readout.js?v=2"></script>
 </body>
 </html>
