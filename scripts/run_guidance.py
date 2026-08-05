@@ -52,7 +52,7 @@ def write_error_outputs(output_dir: Path, asset_dir: Path, err: BaseException) -
 
     payload = {
         "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "display_version": 3,
+        "display_version": 4,
         "status": "error",
         "error_message": str(err),
         "error_log": "guidance_error.txt",
@@ -73,6 +73,7 @@ def write_error_outputs(output_dir: Path, asset_dir: Path, err: BaseException) -
             "index": "assets/latest_index.png",
             "probability": "assets/latest_probability.png",
         },
+        "readout": None,
         "disclaimer": (
             "Experimental/research guidance only. Not official NWS operational guidance."
         ),
@@ -97,6 +98,7 @@ def generate_guidance(args) -> None:
         write_raster_overlay,
     )
     from mbcp_guidance.rap import download_latest_rap, open_grib_datasets
+    from mbcp_guidance.readout import write_readout_grid
 
     domain_config = load_yaml(args.domain)
     model_config = load_json(args.model)
@@ -131,17 +133,24 @@ def generate_guidance(args) -> None:
     print("Applying refined Gulf Coast logistic model...")
     probability, index = apply_refined_model(fields, model_config)
 
-    index_display = smooth_display_field(
-        index.clip(min=0, max=10),
-        sigma=1.0,
-    ).clip(min=0, max=10)
+    index_raw = index.clip(min=0, max=10)
+    probability_raw = (probability * 100).clip(min=0, max=100)
+    index_display = smooth_display_field(index_raw, sigma=1.0).clip(min=0, max=10)
     probability_display = smooth_display_field(
-        (probability * 100).clip(min=0, max=100),
+        probability_raw,
         sigma=1.0,
     ).clip(min=0, max=100)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     args.asset_dir.mkdir(parents=True, exist_ok=True)
+
+    print("Writing unsmoothed point-readout data...")
+    readout_metadata = write_readout_grid(
+        index_raw,
+        probability_raw,
+        args.output_dir / "readout_grid.json",
+        cycle_meta,
+    )
 
     print("Writing smoother compatibility contours...")
     write_contours(
@@ -187,10 +196,18 @@ def generate_guidance(args) -> None:
         cycle_meta,
     )
 
+    latest_path = args.output_dir / "latest.json"
     write_latest_json(
-        args.output_dir / "latest.json",
+        latest_path,
         cycle_meta,
         layers={"index": index_layer, "probability": probability_layer},
+    )
+    latest_payload = json.loads(latest_path.read_text(encoding="utf-8"))
+    latest_payload["display_version"] = 4
+    latest_payload["readout"] = readout_metadata
+    latest_path.write_text(
+        json.dumps(latest_payload, indent=2),
+        encoding="utf-8",
     )
 
     error_log = args.output_dir / "guidance_error.txt"
