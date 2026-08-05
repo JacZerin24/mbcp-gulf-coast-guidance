@@ -11,10 +11,10 @@ on:
       - "requirements.txt"
       - ".github/workflows/update_guidance.yml"
   schedule:
-    # Poll every five minutes so a newly available hourly RAP analysis is
-    # detected quickly. GitHub schedules are approximate, so checks are
-    # staggered away from the top of the hour.
-    - cron: "3,8,13,18,23,28,33,38,43,48,53,58 * * * *"
+    # GitHub frequently delays or drops very high-frequency scheduled events.
+    # Start two watcher runs per hour; each one checks RAP availability every
+    # two minutes for up to 24 minutes.
+    - cron: "7,37 * * * *"
 
 permissions:
   contents: read
@@ -28,7 +28,7 @@ concurrency:
 jobs:
   update-guidance:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 40
 
     environment:
       name: github-pages
@@ -57,8 +57,34 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
+      - name: Watch for a newer RAP cycle
+        id: rap_watch
+        if: github.event_name == 'schedule'
+        shell: bash
+        env:
+          PUBLISHED_METADATA_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data/latest.json
+        run: |
+          set +e
+          PYTHONPATH=. python scripts/wait_for_new_rap.py \
+            --published-url "$PUBLISHED_METADATA_URL" \
+            --poll-seconds 120 \
+            --max-wait-minutes 24 \
+            --cache-dir cache
+          status=$?
+          set -e
+
+          if [ "$status" -eq 0 ]; then
+            echo "new_cycle=true" >> "$GITHUB_OUTPUT"
+          elif [ "$status" -eq 3 ]; then
+            echo "new_cycle=false" >> "$GITHUB_OUTPUT"
+            echo "No newer RAP cycle appeared during this watcher window."
+          else
+            exit "$status"
+          fi
+
       - name: Generate latest RAP guidance
         id: guidance
+        if: github.event_name != 'schedule' || steps.rap_watch.outputs.new_cycle == 'true'
         continue-on-error: true
         run: |
           PYTHONPATH=. python scripts/run_guidance.py \
@@ -76,14 +102,17 @@ jobs:
           retention-days: 7
 
       - name: Configure Pages
+        if: always() && steps.guidance.outcome != 'skipped'
         uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
+        if: always() && steps.guidance.outcome != 'skipped'
         uses: actions/upload-pages-artifact@v3
         with:
           path: web
 
       - name: Deploy to GitHub Pages
+        if: always() && steps.guidance.outcome != 'skipped'
         id: deployment
         uses: actions/deploy-pages@v4
 
