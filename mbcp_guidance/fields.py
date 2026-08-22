@@ -189,6 +189,16 @@ def _mlcape_profile_value(
             tdsfc_k = float(_to_kelvin(np.asarray([surface_dewpoint]))[0])
             tdsfc_k = min(tdsfc_k, tsfc_k)
 
+            # Explicitly remove any isobaric values below the analyzed surface.
+            # Some model files can contain extrapolated values at pressures greater
+            # than surface pressure, and those must not become the parcel bottom.
+            above_surface = pressure <= psfc_hpa + 0.5
+            pressure = pressure[above_surface]
+            temperature_k = temperature_k[above_surface]
+            dewpoint_k = dewpoint_k[above_surface]
+            if pressure.size < 8:
+                return np.nan
+
             nearest = np.where(np.abs(pressure - psfc_hpa) <= 0.5)[0]
             if nearest.size:
                 index = int(nearest[0])
