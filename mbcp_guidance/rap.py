@@ -176,13 +176,39 @@ def subset_domain(ds: xr.Dataset | xr.DataArray, bbox: dict):
 
 
 def find_isobaric_dataset(datasets: list[xr.Dataset]) -> xr.Dataset:
-    """Find a dataset containing pressure-level temperature fields."""
-    for ds in datasets:
-        if "isobaricInhPa" in ds.coords and any(
-            variable in ds.data_vars for variable in ["t", "gh", "r"]
-        ):
+    """Find the complete RAP isobaric thermodynamic dataset.
+
+    cfgrib can return multiple pressure-level groups. Prefer a group containing
+    temperature, relative humidity, and geopotential height together instead of
+    accepting the first group that happens to contain only one relevant field.
+    """
+    candidates = [ds for ds in datasets if "isobaricInhPa" in ds.coords]
+
+    for ds in candidates:
+        has_temperature = "t" in ds.data_vars
+        has_rh = "r" in ds.data_vars
+        has_height = "gh" in ds.data_vars or "z" in ds.data_vars
+        if has_temperature and has_rh and has_height:
             return ds
-    raise ValueError("Could not find an isobaric pressure-level RAP dataset")
+
+    # If cfgrib split compatible isobaric fields into separate datasets, try to
+    # merge them by their shared pressure/grid coordinates before giving up.
+    if candidates:
+        try:
+            merged = xr.merge(candidates, compat="override", join="inner")
+            if (
+                "t" in merged.data_vars
+                and "r" in merged.data_vars
+                and ("gh" in merged.data_vars or "z" in merged.data_vars)
+            ):
+                return merged
+        except Exception:
+            pass
+
+    raise ValueError(
+        "Could not find a complete isobaric RAP dataset containing temperature, "
+        "relative humidity, and geopotential height"
+    )
 
 
 def find_field(datasets: list[xr.Dataset], candidates: list[str]) -> xr.DataArray | None:

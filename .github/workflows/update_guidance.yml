@@ -29,7 +29,7 @@ concurrency:
 jobs:
   update-guidance:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
 
     environment:
       name: github-pages
@@ -101,6 +101,13 @@ jobs:
             --asset-dir web/assets \
             --fail-on-error
 
+      - name: Validate generated guidance artifacts
+        id: artifact_validation
+        if: steps.guidance.outcome == 'success'
+        run: |
+          PYTHONPATH=. python scripts/validate_guidance_artifacts.py \
+            --web-dir web
+
       - name: Upload RAP error log
         if: steps.guidance.outcome == 'failure'
         uses: actions/upload-artifact@v4
@@ -110,23 +117,39 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+      # Guidance-generation failures intentionally deploy the generated error page.
+      # Successful generation is deployed only after the artifact validator passes.
       - name: Configure Pages
-        if: always() && steps.guidance.outcome != 'skipped'
+        if: always() && steps.guidance.outcome != 'skipped' && (steps.guidance.outcome == 'failure' || steps.artifact_validation.outcome == 'success')
         uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
-        if: always() && steps.guidance.outcome != 'skipped'
+        if: always() && steps.guidance.outcome != 'skipped' && (steps.guidance.outcome == 'failure' || steps.artifact_validation.outcome == 'success')
         uses: actions/upload-pages-artifact@v3
         with:
           path: web
 
       - name: Deploy to GitHub Pages
-        if: always() && steps.guidance.outcome != 'skipped'
+        if: always() && steps.guidance.outcome != 'skipped' && (steps.guidance.outcome == 'failure' || steps.artifact_validation.outcome == 'success')
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Verify published GitHub Pages guidance
+        if: steps.guidance.outcome == 'success' && steps.artifact_validation.outcome == 'success' && steps.deployment.outcome == 'success'
+        run: |
+          PYTHONPATH=. python scripts/validate_guidance_artifacts.py \
+            --base-url "${{ steps.deployment.outputs.page_url }}" \
+            --retries 12 \
+            --retry-seconds 10
 
       - name: Mark failed guidance generation
         if: steps.guidance.outcome == 'failure'
         run: |
           echo "RAP guidance generation failed. See the rap-guidance-error artifact and web/data/guidance_error.txt."
+          exit 1
+
+      - name: Mark failed artifact validation
+        if: steps.artifact_validation.outcome == 'failure'
+        run: |
+          echo "Generated guidance failed production-QC validation and was not deployed."
           exit 1
