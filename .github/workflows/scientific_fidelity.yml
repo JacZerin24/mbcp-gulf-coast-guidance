@@ -43,3 +43,13 @@ jobs:
       - name: Run scientific fidelity regression tests
         run: |
           PYTHONPATH=. python -m unittest discover -s tests -p "test_*.py" -v
+
+      # Temporary verification step for the post-PR #11 audit. This branch will
+      # not be merged; the normal update workflow already performs this check
+      # after every successful GitHub Pages deployment.
+      - name: Verify currently published guidance end to end
+        run: |
+          PYTHONPATH=. python scripts/validate_guidance_artifacts.py \
+            --base-url "https://jaczerin24.github.io/mbcp-gulf-coast-guidance/" \
+            --retries 18 \
+            --retry-seconds 10
