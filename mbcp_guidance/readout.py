@@ -51,7 +51,9 @@ def _align_field(field: xr.DataArray, template: xr.DataArray, name: str) -> xr.D
         try:
             return field.interp_like(template)
         except Exception as exc:
-            raise ValueError(f"Could not align diagnostic field {name!r} to readout grid") from exc
+            raise ValueError(
+                f"Could not align diagnostic field {name!r} to readout grid"
+            ) from exc
 
 
 def _model_metadata(model_config: dict) -> dict:
@@ -61,6 +63,7 @@ def _model_metadata(model_config: dict) -> dict:
             {
                 "key": key,
                 "description": meta.get("description", key),
+                "research_definition": meta.get("research_definition", ""),
                 "units": meta.get("units", ""),
                 "mean": float(meta["mean"]),
                 "std": float(meta["std"]),
@@ -72,9 +75,13 @@ def _model_metadata(model_config: dict) -> dict:
         "name": model_config.get("name", "refined Gulf Coast model"),
         "version": model_config.get("version", "unknown"),
         "description": model_config.get("description", ""),
-        "target": model_config.get("target", "conditional damaging wind probability"),
+        "target": model_config.get(
+            "target",
+            "conditional damaging wind probability",
+        ),
         "intercept": float(model_config["intercept"]),
         "probability_to_index": model_config.get("probability_to_index", {}),
+        "research_model": model_config.get("research_model", {}),
         "variables": variables,
     }
 
@@ -114,7 +121,8 @@ def write_readout_grid(
     missing = [key for key in variable_keys if key not in fields]
     if missing:
         raise ValueError(
-            "Missing model fields required for diagnostic readout: " + ", ".join(missing)
+            "Missing model fields required for diagnostic readout: "
+            + ", ".join(missing)
         )
 
     predictor_arrays: list[np.ndarray] = []
@@ -154,7 +162,10 @@ def write_readout_grid(
             round(float(index_value), 2),
             round(float(probability_value), 1),
         ]
-        row.extend(round(float(values[point_index]), 3) for values in flat_arrays)
+        row.extend(
+            round(float(values[point_index]), 3)
+            for values in flat_arrays
+        )
         points.append(row)
 
     columns = [
@@ -165,7 +176,9 @@ def write_readout_grid(
         *variable_keys,
     ]
     payload = {
-        "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "generated_at_utc": datetime.now(timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        ),
         "cycle": cycle_meta,
         "columns": columns,
         "model": model_meta,

@@ -1,63 +1,97 @@
 {
   "name": "refined_gulf_coast_greedy",
-  "version": "prototype-2026-07",
-  "description": "Experimental logistic model trained on Gulf Coast warm-season damaging-wind and null-convection cases. Coefficients are standardized and should be used with the means/stds in this file.",
+  "version": "research-full-fit-2026-07-v1",
+  "description": "Seven-predictor Gulf Coast damaging-wind logistic model reproduced from the final project workbook and analysis pipeline. Real-time guidance uses the full-data fit; reported research skill metrics are 5-fold stratified cross-validation results.",
   "target": "conditional damaging convective wind probability",
-  "intercept": 0.809,
+  "research_model": {
+    "training_cases": 287,
+    "wind_cases": 179,
+    "null_cases": 108,
+    "imputer": "median",
+    "selected_predictor_missing_values": 0,
+    "scaler": "sklearn StandardScaler",
+    "classifier": "sklearn LogisticRegression",
+    "penalty": "l2",
+    "C": 1.0,
+    "solver": "lbfgs",
+    "max_iter": 5000,
+    "deployment_fit": "fit on all 287 research cases",
+    "validation": {
+      "method": "5-fold stratified cross-validation",
+      "folds": 5,
+      "shuffle": true,
+      "random_state": 42,
+      "auc": 0.892148,
+      "brier_score": 0.119041,
+      "log_loss": 0.392075,
+      "average_precision": 0.911703,
+      "mean_predicted_probability": 0.622503,
+      "observed_wind_frequency": 0.623693
+    }
+  },
+  "intercept": 0.8094908235486754,
   "probability_to_index": {
-    "method": "round_probability_times_10",
+    "method": "numpy_rint_probability_times_10",
+    "expression": "clip(rint(probability * 10), 0, 10)",
     "min_index": 0,
     "max_index": 10
   },
   "variables": {
     "vertical_totals_850_500_c": {
-      "mean": 25.81,
-      "std": 1.72,
-      "coefficient": 1.522,
+      "mean": 25.81324041811847,
+      "std": 1.7209203501634796,
+      "coefficient": 1.5217248759463,
       "units": "degC",
-      "description": "850-500 mb vertical totals temperature difference"
+      "description": "850-500 hPa Vertical Totals",
+      "research_definition": "Temperature interpolated to 850 hPa minus temperature interpolated to 500 hPa."
     },
     "mlcape_jkg": {
-      "mean": 2036.0,
-      "std": 786.0,
-      "coefficient": 0.678,
+      "mean": 2035.5331010452962,
+      "std": 786.3224095949129,
+      "coefficient": 0.6775074970800621,
       "units": "J kg-1",
-      "description": "mixed-layer CAPE"
+      "description": "100-hPa mixed-layer CAPE",
+      "research_definition": "MetPy mixed_layer_cape_cin using the lowest 100 hPa of the surface-anchored pressure/temperature/dewpoint profile."
     },
     "sbli_c": {
-      "mean": -6.08,
-      "std": 1.93,
-      "coefficient": 0.072,
+      "mean": -6.08034843205575,
+      "std": 1.9338917138312237,
+      "coefficient": 0.07183989213548049,
       "units": "degC",
-      "description": "surface-based lifted index"
+      "description": "Surface-based Lifted Index",
+      "research_definition": "MetPy surface parcel profile followed by lifted_index; equivalent fallback is environmental T500 minus surface-parcel T500."
     },
     "mid_level_lapse_rate_c_km": {
-      "mean": 5.73,
-      "std": 0.47,
-      "coefficient": 0.334,
+      "mean": 5.734773519163763,
+      "std": 0.4719400255655596,
+      "coefficient": 0.3339755121134182,
       "units": "degC km-1",
-      "description": "mid-level lapse rate, prototype calculation from pressure levels"
+      "description": "700-500 hPa lapse rate",
+      "research_definition": "(T700 - T500) divided by the 700-to-500 hPa geopotential-height difference in kilometers."
     },
     "sfc_3km_lapse_rate_c_km": {
-      "mean": 7.30,
-      "std": 0.76,
-      "coefficient": 0.460,
+      "mean": 7.300871080139372,
+      "std": 0.7628958268421181,
+      "coefficient": 0.4603031105367659,
       "units": "degC km-1",
-      "description": "surface to 3 km lapse rate, prototype calculation from pressure levels"
+      "description": "Surface-to-3-km AGL lapse rate",
+      "research_definition": "Surface temperature minus temperature interpolated to 3000 m AGL, divided by 3 km."
     },
     "dcape_jkg": {
       "mean": 1118.0,
-      "std": 290.0,
-      "coefficient": -0.055,
+      "std": 290.05069843995415,
+      "coefficient": -0.055205968471457686,
       "units": "J kg-1",
-      "description": "downdraft CAPE"
+      "description": "Downdraft CAPE",
+      "research_definition": "MetPy downdraft_cape calculated from the surface-anchored pressure/temperature/dewpoint profile."
     },
     "thetae_deficit_k": {
-      "mean": 28.97,
-      "std": 5.41,
-      "coefficient": 0.385,
+      "mean": 28.971428571428575,
+      "std": 5.410567062543238,
+      "coefficient": 0.3845449044287419,
       "units": "K",
-      "description": "low-level to mid-level theta-e deficit"
+      "description": "Theta-e deficit",
+      "research_definition": "Maximum theta-e in the lowest 100 hPa above the actual surface pressure minus minimum theta-e from 700-500 hPa."
     }
   }
 }

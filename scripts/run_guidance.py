@@ -9,6 +9,9 @@ from pathlib import Path
 import numpy as np
 
 
+DISPLAY_VERSION = 7
+
+
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -54,7 +57,7 @@ def write_error_outputs(output_dir: Path, asset_dir: Path, err: BaseException) -
 
     payload = {
         "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "display_version": 6,
+        "display_version": DISPLAY_VERSION,
         "status": "error",
         "error_message": str(err),
         "error_log": "guidance_error.txt",
@@ -78,6 +81,7 @@ def write_error_outputs(output_dir: Path, asset_dir: Path, err: BaseException) -
         "readout": None,
         "field_methods": None,
         "field_stats": None,
+        "scientific_fidelity": None,
         "disclaimer": (
             "Experimental/research guidance only. Not official NWS operational guidance."
         ),
@@ -88,6 +92,24 @@ def write_error_outputs(output_dir: Path, asset_dir: Path, err: BaseException) -
     )
     print("RAP guidance generation failed, but wrote web error outputs.")
     print(traceback_text)
+
+
+def _summarize_field(da) -> dict:
+    values = np.asarray(da.values, dtype=float)
+    valid = values[np.isfinite(values)]
+    if valid.size == 0:
+        return {
+            "valid_grid_points": 0,
+            "minimum": None,
+            "median": None,
+            "maximum": None,
+        }
+    return {
+        "valid_grid_points": int(valid.size),
+        "minimum": round(float(np.min(valid)), 3),
+        "median": round(float(np.median(valid)), 3),
+        "maximum": round(float(np.max(valid)), 3),
+    }
 
 
 def generate_guidance(args) -> None:
@@ -132,28 +154,19 @@ def generate_guidance(args) -> None:
     print(f"Opening RAP file: {grib_path}")
     datasets = open_grib_datasets(grib_path)
 
-    print("Calculating gridded environmental fields...")
+    print("Calculating research-definition gridded environmental fields...")
     fields = calculate_environmental_fields(datasets, bounding_box)
 
-    mlcape_values = np.asarray(fields["mlcape_jkg"].values, dtype=float)
-    mlcape_valid = mlcape_values[np.isfinite(mlcape_values)]
-    if mlcape_valid.size == 0:
-        raise ValueError("Calculated MLCAPE field contained no valid grid points")
-    mlcape_stats = {
-        "valid_grid_points": int(mlcape_valid.size),
-        "minimum_jkg": round(float(np.min(mlcape_valid)), 1),
-        "median_jkg": round(float(np.median(mlcape_valid)), 1),
-        "maximum_jkg": round(float(np.max(mlcape_valid)), 1),
-    }
-    print(
-        "Calculated 100-hPa MLCAPE from RAP profiles: "
-        f"n={mlcape_stats['valid_grid_points']}, "
-        f"min={mlcape_stats['minimum_jkg']:.1f}, "
-        f"median={mlcape_stats['median_jkg']:.1f}, "
-        f"max={mlcape_stats['maximum_jkg']:.1f} J/kg"
-    )
+    field_stats = {key: _summarize_field(value) for key, value in fields.items()}
+    for key, stats in field_stats.items():
+        if stats["valid_grid_points"] == 0:
+            raise ValueError(f"Calculated field {key} contained no valid grid points")
+        print(
+            f"{key}: n={stats['valid_grid_points']}, "
+            f"min={stats['minimum']}, median={stats['median']}, max={stats['maximum']}"
+        )
 
-    print("Applying refined Gulf Coast logistic model...")
+    print("Applying exact full-data refined Gulf Coast logistic model...")
     probability, index = apply_refined_model(fields, model_config)
 
     index_raw = index.clip(min=0, max=10)
@@ -228,7 +241,7 @@ def generate_guidance(args) -> None:
         layers={"index": index_layer, "probability": probability_layer},
     )
     latest_payload = json.loads(latest_path.read_text(encoding="utf-8"))
-    latest_payload["display_version"] = 6
+    latest_payload["display_version"] = DISPLAY_VERSION
     latest_payload["readout"] = readout_metadata
     latest_payload["model"] = {
         "name": model_config.get("name", "refined Gulf Coast model"),
@@ -236,19 +249,24 @@ def generate_guidance(args) -> None:
         "target": model_config.get("target", "conditional damaging wind probability"),
         "predictor_count": len(model_config.get("variables", {})),
     }
-    latest_payload["field_methods"] = {
-        "mlcape_jkg": {
-            "method": "MetPy mixed_layer_cape_cin",
-            "mixed_layer_depth_hpa": 100,
-            "profile_source": "RAP pressure-level temperature and relative humidity",
-            "surface_augmentation": (
-                "RAP surface pressure plus 2-m temperature/dewpoint when available; "
-                "otherwise lowest valid pressure level"
-            ),
-            "native_rap_cape_diagnostic_used": False,
-        }
+    latest_payload["scientific_fidelity"] = {
+        "status": "research definitions implemented",
+        "model_fit": "exact full-data fit reproduced from final project workbook",
+        "model_version": model_config.get("version", "unknown"),
+        "remaining_validation": (
+            "Compare gridded RAP predictor values against original point-based "
+            "RAP BUFKIT research values at historical cases."
+        ),
     }
-    latest_payload["field_stats"] = {"mlcape_jkg": mlcape_stats}
+    latest_payload["field_methods"] = {
+        key: {
+            "description": meta.get("description", key),
+            "research_definition": meta.get("research_definition", ""),
+            "units": meta.get("units", ""),
+        }
+        for key, meta in model_config.get("variables", {}).items()
+    }
+    latest_payload["field_stats"] = field_stats
     latest_path.write_text(
         json.dumps(latest_payload, indent=2),
         encoding="utf-8",
