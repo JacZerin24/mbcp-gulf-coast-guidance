@@ -1,0 +1,120 @@
+name: Western index saturation audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/western_saturation_audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit-western-guidance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Audit western high-probability guidance
+        run: |
+          python - <<'PY'
+          import json, math, time, urllib.request
+          from statistics import mean
+
+          BASE = "https://jaczerin24.github.io/mbcp-gulf-coast-guidance/"
+
+          def fetch_json(path):
+              req = urllib.request.Request(
+                  BASE + path + f"?audit={time.time_ns()}",
+                  headers={"Cache-Control":"no-cache", "User-Agent":"mbcp-west-audit"},
+              )
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  return json.load(response)
+
+          def pct(vals, q):
+              vals = sorted(vals)
+              if not vals: return float('nan')
+              p = (len(vals)-1)*q
+              lo, hi = math.floor(p), math.ceil(p)
+              if lo == hi: return vals[lo]
+              f = p-lo
+              return vals[lo]*(1-f)+vals[hi]*f
+
+          latest = fetch_json("data/latest.json")
+          readout = fetch_json("data/" + latest["readout"]["file"])
+          cols = {name:i for i,name in enumerate(readout["columns"])}
+          pts = readout["points"]
+          vars_ = readout["model"]["variables"]
+          intercept = float(readout["model"]["intercept"])
+
+          rows=[]
+          for r in pts:
+              row={name:float(r[i]) for name,i in cols.items()}
+              rows.append(row)
+
+          lons=[r['longitude'] for r in rows]
+          west, east=min(lons), max(lons)
+          width=east-west
+          cuts=[west, west+0.25*width, west+0.50*width, west+0.75*width, east+1e-6]
+          print("CYCLE", json.dumps(latest['cycle']))
+          print(f"longitude extent {west:.3f} to {east:.3f}")
+          print("\nWEST-EAST QUARTILES")
+          for i in range(4):
+              subset=[r for r in rows if cuts[i] <= r['longitude'] < cuts[i+1]]
+              probs=[r['probability_percent'] for r in subset]
+              idx=[r['index'] for r in subset]
+              n95=sum(p>=95 for p in probs)
+              n10=sum(round(x)==10 for x in idx)
+              print(json.dumps({
+                  'band':i+1,'lon_min':round(cuts[i],3),'lon_max':round(cuts[i+1],3),
+                  'n':len(subset),'mean_prob':round(mean(probs),2),'median_prob':round(pct(probs,.5),2),
+                  'p75':round(pct(probs,.75),2),'p90':round(pct(probs,.9),2),'max':round(max(probs),2),
+                  'pct_ge95':round(100*n95/len(subset),1),'pct_index10':round(100*n10/len(subset),1)
+              }))
+
+          western=[r for r in rows if r['longitude'] <= west+0.50*width]
+          western95=[r for r in western if r['probability_percent']>=95]
+          print(f"\nWEST HALF: {len(western)} pts; >=95% {len(western95)} ({100*len(western95)/len(western):.1f}%)")
+
+          print("\nWEST-HALF PREDICTOR SUMMARY")
+          for v in vars_:
+              key=v['key']; mu=float(v['mean']); sd=float(v['std']); coef=float(v['coefficient'])
+              vals=[r[key] for r in western]; zs=[(x-mu)/sd for x in vals]
+              vals95=[r[key] for r in western95]; zs95=[(x-mu)/sd for x in vals95]
+              print(json.dumps({
+                  'key':key,'train_mean':mu,'train_std':sd,'coef':coef,
+                  'west_median':round(pct(vals,.5),3),'west_mean_z':round(mean(zs),3),
+                  'west95_median':round(pct(vals95,.5),3) if vals95 else None,
+                  'west95_mean_z':round(mean(zs95),3) if zs95 else None,
+                  'west95_mean_contribution':round(coef*mean(zs95),3) if zs95 else None,
+                  'west95_absz_gt3_pct':round(100*sum(abs(z)>3 for z in zs95)/len(zs95),1) if zs95 else None
+              }))
+
+          print("\nTOP 15 WESTERN POINTS")
+          top=sorted(western, key=lambda r:r['probability_percent'], reverse=True)[:15]
+          for r in top:
+              contrib=[]
+              logit=intercept
+              for v in vars_:
+                  key=v['key']; z=(r[key]-float(v['mean']))/float(v['std']); c=float(v['coefficient'])*z
+                  logit += c; contrib.append((abs(c),key,c,z,r[key]))
+              contrib.sort(reverse=True)
+              print(json.dumps({
+                  'lat':r['latitude'],'lon':r['longitude'],'prob':r['probability_percent'],'index':r['index'],
+                  'drivers':[{'key':k,'value':round(val,3),'z':round(z,2),'contrib':round(c,3)} for _,k,c,z,val in contrib]
+              }))
+
+          # Diagnose whether 95% saturation requires extreme values or ordinary research-range combinations.
+          print("\nWESTERN >=95% EXTREMENESS")
+          if western95:
+              any_gt3=0; all_within3=0
+              for r in western95:
+                  zs=[abs((r[v['key']]-float(v['mean']))/float(v['std'])) for v in vars_]
+                  if any(z>3 for z in zs): any_gt3 += 1
+                  else: all_within3 += 1
+              print(f">=95 points with at least one |z|>3: {any_gt3}/{len(western95)} ({100*any_gt3/len(western95):.1f}%)")
+              print(f">=95 points with ALL seven predictors within +/-3 sigma: {all_within3}/{len(western95)} ({100*all_within3/len(western95):.1f}%)")
+          PY
