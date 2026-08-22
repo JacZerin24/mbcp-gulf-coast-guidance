@@ -1,0 +1,90 @@
+name: Raw RAP vertical totals audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/raw_rap_vt_audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify-raw-rap-vt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install RAP read dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libeccodes0
+          python -m pip install --upgrade pip
+          python -m pip install numpy xarray cfgrib eccodes herbie-data
+      - name: Compare raw RAP T850/T500 with published Vertical Totals
+        run: |
+          python - <<'PY'
+          import json, time, urllib.request
+          from datetime import datetime
+          import numpy as np
+          import cfgrib
+          from herbie import Herbie
+
+          BASE='https://jaczerin24.github.io/mbcp-gulf-coast-guidance/'
+          def fetch(path):
+              req=urllib.request.Request(BASE+path+f'?x={time.time_ns()}',headers={'Cache-Control':'no-cache','User-Agent':'mbcp-raw-rap-audit'})
+              with urllib.request.urlopen(req,timeout=30) as r: return json.load(r)
+
+          latest=fetch('data/latest.json')
+          readout=fetch('data/'+latest['readout']['file'])
+          c=latest['cycle']
+          cycle=datetime.fromisoformat(c['cycle_time_utc'].replace('Z','+00:00')).replace(tzinfo=None)
+          fhr=int(c['forecast_hour'])
+          H=Herbie(cycle,model='rap',product='awp130pgrb',fxx=fhr,verbose=False)
+          path=H.download(errors='raise')
+          dsets=cfgrib.open_datasets(str(path),backend_kwargs={'indexpath':''})
+          candidates=[ds for ds in dsets if 'isobaricInhPa' in ds.coords and 't' in ds.data_vars]
+          if not candidates: raise RuntimeError('No RAP isobaric temperature dataset found')
+          ds=max(candidates,key=lambda d:d['isobaricInhPa'].size)
+          levels=np.asarray(ds['isobaricInhPa'].values,dtype=float)
+          print('cycle',c)
+          print('pressure levels include 850,500:',850 in levels,500 in levels)
+
+          lat=np.asarray(ds['latitude'].values,dtype=float)
+          lon=np.asarray(ds['longitude'].values,dtype=float)
+          lon=((lon+180)%360)-180
+          t850=np.asarray(ds['t'].sel(isobaricInhPa=850).values,dtype=float)
+          t500=np.asarray(ds['t'].sel(isobaricInhPa=500).values,dtype=float)
+
+          cols={name:i for i,name in enumerate(readout['columns'])}
+          pub=[]
+          for r in readout['points']:
+              pub.append({name:float(r[i]) for name,i in cols.items()})
+
+          targets=[
+              (31.1088,-91.7473),
+              (30.9877,-91.7507),
+              (30.1499,-92.3352),
+              (30.30,-89.20),
+          ]
+          for y,x in targets:
+              # nearest native RAP grid cell using locally scaled lon distance
+              metric=(lat-y)**2 + ((lon-x)*np.cos(np.deg2rad(y)))**2
+              j,i=np.unravel_index(np.nanargmin(metric),metric.shape)
+              raw850=float(t850[j,i]-273.15 if t850[j,i]>150 else t850[j,i])
+              raw500=float(t500[j,i]-273.15 if t500[j,i]>150 else t500[j,i])
+              rawvt=raw850-raw500
+              nearest=min(pub,key=lambda r:(r['latitude']-float(lat[j,i]))**2+((r['longitude']-float(lon[j,i]))*np.cos(np.deg2rad(float(lat[j,i]))))**2)
+              print(json.dumps({
+                  'requested':[y,x],
+                  'rap_grid':[round(float(lat[j,i]),4),round(float(lon[j,i]),4)],
+                  'raw_T850_C':round(raw850,3),'raw_T500_C':round(raw500,3),'raw_VT_C':round(rawvt,3),
+                  'published_nearest':[nearest['latitude'],nearest['longitude']],
+                  'published_VT_C':nearest['vertical_totals_850_500_c'],
+                  'published_probability_pct':nearest['probability_percent'],
+                  'published_index':nearest['index'],
+                  'VT_difference_raw_minus_published':round(rawvt-nearest['vertical_totals_850_500_c'],4)
+              }))
+          PY
