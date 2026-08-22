@@ -1,0 +1,158 @@
+name: Live probability distribution audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/live_probability_audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit-live-guidance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Audit published probability distribution and model drivers
+        run: |
+          python - <<'PY'
+          import json
+          import math
+          import time
+          import urllib.request
+          from statistics import mean
+
+          BASE = "https://jaczerin24.github.io/mbcp-gulf-coast-guidance/"
+
+          def fetch_json(path):
+              url = BASE + path + f"?audit={time.time_ns()}"
+              req = urllib.request.Request(url, headers={"Cache-Control": "no-cache", "User-Agent": "mbcp-live-audit"})
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  return json.load(response)
+
+          def percentile(values, q):
+              vals = sorted(float(v) for v in values)
+              if not vals:
+                  return float("nan")
+              if len(vals) == 1:
+                  return vals[0]
+              pos = (len(vals) - 1) * q
+              lo = int(math.floor(pos))
+              hi = int(math.ceil(pos))
+              if lo == hi:
+                  return vals[lo]
+              frac = pos - lo
+              return vals[lo] * (1 - frac) + vals[hi] * frac
+
+          def sigmoid(x):
+              if x >= 0:
+                  e = math.exp(-x)
+                  return 1.0 / (1.0 + e)
+              e = math.exp(x)
+              return e / (1.0 + e)
+
+          latest = fetch_json("data/latest.json")
+          readout_path = latest["readout"]["file"]
+          readout = fetch_json("data/" + readout_path)
+          cols = readout["columns"]
+          points = readout["points"]
+          col = {name: i for i, name in enumerate(cols)}
+          model = readout["model"]
+          variables = model["variables"]
+
+          probs = [float(row[col["probability_percent"]]) for row in points]
+          indices = [int(round(float(row[col["index"]]))) for row in points]
+
+          print("=== LIVE GUIDANCE DISTRIBUTION AUDIT ===")
+          print(json.dumps({"cycle": latest.get("cycle"), "point_count": len(points), "model": latest.get("model")}, indent=2))
+          print()
+          print("UNSMOOTHED PROBABILITY DISTRIBUTION (%)")
+          print(f"min={min(probs):.1f} mean={mean(probs):.2f} median={percentile(probs,0.5):.1f} max={max(probs):.1f}")
+          print("percentiles:", " ".join(f"p{int(q*100):02d}={percentile(probs,q):.1f}" for q in [0.05,0.10,0.25,0.50,0.75,0.90,0.95,0.99]))
+          for threshold in [50, 60, 70, 80, 90, 95]:
+              n = sum(p >= threshold for p in probs)
+              print(f">={threshold:2d}%: {n:4d}/{len(probs)} = {100*n/len(probs):5.1f}% of valid grid points")
+          print()
+          print("INDEX DISTRIBUTION")
+          for idx in range(11):
+              n = sum(v == idx for v in indices)
+              print(f"index {idx:2d}: {n:4d} ({100*n/len(indices):5.1f}%)")
+
+          intercept = float(model["intercept"])
+          baseline = 100.0 * sigmoid(intercept)
+          research = model.get("research_model", {})
+          validation = research.get("validation", {})
+          print()
+          print("MODEL CALIBRATION CONTEXT")
+          print(f"intercept-only probability at all training means (z=0): {baseline:.2f}%")
+          print(f"research observed wind frequency: {100*float(validation.get('observed_wind_frequency', float('nan'))):.2f}%")
+          print(f"research mean 5-fold CV predicted probability: {100*float(validation.get('mean_predicted_probability', float('nan'))):.2f}%")
+          print("NOTE: this is a CONDITIONAL damaging-wind model trained on wind/null convective cases, not an unconditional probability of a storm occurring at each grid point.")
+
+          summaries = []
+          high_mask = [p >= 80.0 for p in probs]
+          print()
+          print("LIVE PREDICTORS VS TRAINING STANDARDIZATION")
+          for v in variables:
+              key = v["key"]
+              vals = [float(row[col[key]]) for row in points]
+              mu = float(v["mean"])
+              sd = float(v["std"])
+              coef = float(v["coefficient"])
+              zs = [(x-mu)/sd for x in vals]
+              contrib = [coef*z for z in zs]
+              high_contrib = [c for c,h in zip(contrib, high_mask) if h]
+              high_z = [z for z,h in zip(zs, high_mask) if h]
+              out3 = sum(abs(z) > 3 for z in zs)
+              out4 = sum(abs(z) > 4 for z in zs)
+              item = {
+                  "key": key,
+                  "description": v.get("description", key),
+                  "units": v.get("units", ""),
+                  "training_mean": mu,
+                  "training_std": sd,
+                  "coefficient": coef,
+                  "live_min": min(vals),
+                  "live_q25": percentile(vals,0.25),
+                  "live_median": percentile(vals,0.50),
+                  "live_q75": percentile(vals,0.75),
+                  "live_max": max(vals),
+                  "live_mean_z": mean(zs),
+                  "live_median_z": percentile(zs,0.50),
+                  "mean_logit_contribution": mean(contrib),
+                  "median_logit_contribution": percentile(contrib,0.50),
+                  "high80_mean_z": mean(high_z) if high_z else float("nan"),
+                  "high80_mean_contribution": mean(high_contrib) if high_contrib else float("nan"),
+                  "abs_z_gt3_pct": 100*out3/len(zs),
+                  "abs_z_gt4_pct": 100*out4/len(zs),
+              }
+              summaries.append(item)
+              print(json.dumps(item, sort_keys=False))
+
+          print()
+          print("DOMAIN-MEAN LOGIT DRIVERS (positive raises probability)")
+          for item in sorted(summaries, key=lambda x: abs(x["mean_logit_contribution"]), reverse=True):
+              print(f"{item['key']}: mean contribution={item['mean_logit_contribution']:+.3f}, mean z={item['live_mean_z']:+.3f}")
+
+          print()
+          print("HIGH-PROBABILITY (>=80%) MEAN DRIVERS")
+          for item in sorted(summaries, key=lambda x: abs(x["high80_mean_contribution"]), reverse=True):
+              print(f"{item['key']}: contribution={item['high80_mean_contribution']:+.3f}, z={item['high80_mean_z']:+.3f}")
+
+          med_logit = intercept
+          mean_logit = intercept
+          for item in summaries:
+              med_logit += item["coefficient"] * item["live_median_z"]
+              mean_logit += item["coefficient"] * item["live_mean_z"]
+          print()
+          print(f"probability from vector of live predictor medians: {100*sigmoid(med_logit):.2f}%")
+          print(f"probability from vector of live predictor means:   {100*sigmoid(mean_logit):.2f}%")
+          PY
