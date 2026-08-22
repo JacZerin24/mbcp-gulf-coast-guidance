@@ -7,8 +7,6 @@
   const helpContent = document.getElementById('help-content');
   if (!referenceButton || !helpButton || !referenceModal || !helpModal) return;
 
-  let referenceLoaded = false;
-
   function escapeHtml(value) {
     return String(value ?? '')
       .replaceAll('&', '&amp;')
@@ -71,9 +69,10 @@
     return model.variables.map(variable => `
       <tr>
         <td><strong>${escapeHtml(variable.description)}</strong><small>${escapeHtml(variable.key)}</small></td>
-        <td>${Number(variable.mean).toFixed(variable.units === 'J kg-1' ? 0 : 2)} ${escapeHtml(unitLabel(variable.units))}</td>
-        <td>${Number(variable.std).toFixed(variable.units === 'J kg-1' ? 0 : 2)} ${escapeHtml(unitLabel(variable.units))}</td>
-        <td class="coefficient-number ${Number(variable.coefficient) >= 0 ? 'positive' : 'negative'}">${Number(variable.coefficient) >= 0 ? '+' : ''}${Number(variable.coefficient).toFixed(3)}</td>
+        <td>${escapeHtml(variable.research_definition || '')}</td>
+        <td>${Number(variable.mean).toFixed(variable.units === 'J kg-1' ? 1 : 3)} ${escapeHtml(unitLabel(variable.units))}</td>
+        <td>${Number(variable.std).toFixed(variable.units === 'J kg-1' ? 2 : 3)} ${escapeHtml(unitLabel(variable.units))}</td>
+        <td class="coefficient-number ${Number(variable.coefficient) >= 0 ? 'positive' : 'negative'}">${Number(variable.coefficient) >= 0 ? '+' : ''}${Number(variable.coefficient).toFixed(6)}</td>
       </tr>`).join('');
   }
 
@@ -92,6 +91,21 @@
             <div class="reference-bar-track"><span class="reference-bar ${direction}" style="width:${width.toFixed(1)}%"></span></div>
           </div>`;
       }).join('');
+  }
+
+  function validationCards(model) {
+    const research = model.research_model || {};
+    const validation = research.validation || {};
+    const metric = (key, digits = 3) => Number.isFinite(Number(validation[key])) ? Number(validation[key]).toFixed(digits) : '—';
+    return `
+      <div class="reference-stat-grid">
+        <div><span>Research cases</span><strong>${escapeHtml(research.training_cases ?? '—')}</strong></div>
+        <div><span>Wind / null</span><strong>${escapeHtml(research.wind_cases ?? '—')} / ${escapeHtml(research.null_cases ?? '—')}</strong></div>
+        <div><span>5-fold CV AUC</span><strong>${metric('auc')}</strong></div>
+        <div><span>Brier score</span><strong>${metric('brier_score')}</strong></div>
+        <div><span>Log loss</span><strong>${metric('log_loss')}</strong></div>
+        <div><span>Avg precision</span><strong>${metric('average_precision')}</strong></div>
+      </div>`;
   }
 
   function renderReference(metadata, grid) {
@@ -115,7 +129,7 @@
         </div>
         <div class="reference-stat-grid">
           <div><span>Predictors</span><strong>${model.variables.length}</strong></div>
-          <div><span>Intercept</span><strong>${Number(model.intercept).toFixed(3)}</strong></div>
+          <div><span>Intercept</span><strong>${Number(model.intercept).toFixed(6)}</strong></div>
           <div><span>Current valid</span><strong>${escapeHtml(valid)}</strong></div>
           <div><span>RAP source</span><strong>${escapeHtml(cycleTime)} f${String(forecastHour).padStart(2, '0')}</strong></div>
         </div>
@@ -123,12 +137,12 @@
 
       <section class="modal-section">
         <h3>How the composite is calculated</h3>
-        <p>Each environmental predictor is standardized using the training mean and standard deviation, multiplied by its fitted logistic coefficient, and added to the model intercept.</p>
+        <p>Each environmental predictor is calculated using the same definition as the final research extraction, standardized with the full-data training mean and StandardScaler scale, multiplied by its exact fitted logistic coefficient, and added to the exact fitted intercept.</p>
         <div class="formula-card">
           <code>zᵢ = (xᵢ − meanᵢ) / stdᵢ</code>
           <code>logit = intercept + Σ(coefficientᵢ × zᵢ)</code>
           <code>probability = 1 / (1 + exp(−logit))</code>
-          <code>0–10 index = round(probability × 10)</code>
+          <code>0–10 index = clip(rint(probability × 10), 0, 10)</code>
         </div>
         <p class="modal-note">A positive coefficient means a positive standardized anomaly raises the fitted logit, while a negative coefficient lowers it. Coefficient signs and driver bars describe the fitted statistical model and should not be interpreted as standalone physical causality.</p>
       </section>
@@ -140,13 +154,20 @@
       </section>
 
       <section class="modal-section">
-        <h3>Training normalization statistics</h3>
+        <h3>Predictor definitions and exact fit constants</h3>
         <div class="table-scroll">
           <table class="reference-table">
-            <thead><tr><th>Predictor</th><th>Training mean</th><th>Training std</th><th>Coefficient</th></tr></thead>
+            <thead><tr><th>Predictor</th><th>Research definition</th><th>Training mean</th><th>Training std</th><th>Coefficient</th></tr></thead>
             <tbody>${modelTable(model)}</tbody>
           </table>
         </div>
+      </section>
+
+      <section class="modal-section validation-section">
+        <h3>Research validation</h3>
+        ${validationCards(model)}
+        <p><strong>These are the final project's 5-fold stratified cross-validation metrics.</strong> They describe out-of-fold research performance on the 287-case wind/null dataset. They are not an independent external verification of the live gridded product.</p>
+        <p>Real-time guidance uses the final L2 logistic model fitted on all 287 research cases. Automated regression tests require that the deployed equation reproduce representative full-fit research cases to floating-point precision.</p>
       </section>
 
       <section class="modal-section">
@@ -158,17 +179,17 @@
         </div>
       </section>
 
-      <section class="modal-section validation-section">
-        <h3>Validation status</h3>
-        <p><strong>No independent AUC, Brier score, reliability diagram, ROC curve, or similar verification statistics are stored in this repository yet.</strong> Those values are intentionally not shown or estimated here.</p>
-        <p>The current implementation is a research prototype trained on warm-season damaging-wind and null-convection cases. The original research used point-based RAP sounding extraction, while this web system applies the model to gridded RAP fields. Direct comparison against the original case dataset remains an important validation step.</p>
+      <section class="modal-section">
+        <h3>Remaining validation</h3>
+        <p>The parameter definitions and deployed statistical equation now reproduce the final project methodology. The remaining major science check is a historical data-representation comparison: gridded RAP predictor values should be compared against the original point-based RAP BUFKIT values at known wind and null cases.</p>
       </section>
 
       <section class="modal-section">
         <h3>Data and boundary sources</h3>
         <ul class="reference-list">
           <li><strong>Environment:</strong> RAP 13-km pressure-level guidance accessed through Herbie.</li>
-          <li><strong>Composite:</strong> refined Gulf Coast standardized logistic model in <code>config/refined_gulf_coast_model.json</code>.</li>
+          <li><strong>Composite:</strong> exact full-data refined Gulf Coast standardized logistic fit in <code>config/refined_gulf_coast_model.json</code>.</li>
+          <li><strong>Thermodynamic definitions:</strong> gridded equivalents of the final RAP BUFKIT/MetPy research extraction.</li>
           <li><strong>CWA outline:</strong> NOAA/NWS Reference Map Feature Service.</li>
           <li><strong>County/parish outlines:</strong> U.S. Census Bureau TIGERweb county-equivalent boundaries.</li>
           <li><strong>Display smoothing:</strong> visualization only; hover readouts and driver diagnostics use unsmoothed model values.</li>
@@ -198,8 +219,8 @@
 
       <section id="help-layers" class="modal-section">
         <h3>Displayed guidance layers</h3>
-        <p><strong>0–10 Index:</strong> the fitted conditional probability multiplied by 10 and rounded. It is intended as a quick favorability scale.</p>
-        <p><strong>Probability:</strong> the raw fitted conditional damaging-wind probability from the logistic model, displayed as a percentage.</p>
+        <p><strong>0–10 Index:</strong> the fitted conditional probability multiplied by 10 with NumPy's <code>rint</code> rounding and clipped from 0–10. This exactly matches the final project's index transform.</p>
+        <p><strong>Probability:</strong> the raw fitted conditional damaging-wind probability from the exact full-data logistic model, displayed as a percentage.</p>
         <p>The colored map is lightly smoothed for presentation. That smoothing does not change the hover readout or parameter diagnostics.</p>
       </section>
 
@@ -212,14 +233,14 @@
       <section id="help-readout" class="modal-section">
         <h3>Map hover readout</h3>
         <p>Enable <strong>Hover readout</strong> and move the mouse over the map. The box beside the cursor samples the nearest valid RAP grid point and displays the unsmoothed 0–10 index and conditional probability, grid coordinates, sampling distance, valid time, cycle, and forecast hour.</p>
-        <p>Samples farther than 40 km from a valid model point are rejected so clicks well outside the guidance domain do not produce misleading values.</p>
+        <p>Samples farther than 40 km from a valid model point are rejected so locations well outside the guidance domain do not produce misleading values.</p>
       </section>
 
       <section id="help-diagnostics" class="modal-section">
         <h3>Composite parameter diagnostics</h3>
         <p>Enable <strong>Show parameter drivers</strong>. The diagnostics panel automatically enables the hover readout and updates as you move across the map.</p>
-        <p>For each of the seven predictors it shows the raw RAP-derived value, standardized anomaly <code>z</code>, and additive contribution <code>coefficient × z</code>. Predictors are ranked by the absolute size of that contribution. Positive values raise the model logit and negative values lower it.</p>
-        <p>The panel also reconstructs the logit and probability as a consistency check. These contribution values explain the fitted model calculation, not a physical cause-and-effect attribution.</p>
+        <p>For each of the seven predictors it shows the unsmoothed RAP-derived value, standardized anomaly <code>z</code>, and additive contribution <code>coefficient × z</code>. Predictors are ranked by the absolute size of that contribution. Positive values raise the model logit and negative values lower it.</p>
+        <p>The Reference panel lists the exact research definition used for every predictor. The diagnostics panel reconstructs the logit and probability as a consistency check; contributions explain the statistical calculation, not physical cause-and-effect.</p>
       </section>
 
       <section id="help-boundaries" class="modal-section">
@@ -229,7 +250,7 @@
 
       <section id="help-updates" class="modal-section">
         <h3>How automatic updating works</h3>
-        <p>GitHub Actions launches watcher runs at approximately <strong>:07 and :37 each hour</strong>. Each scheduled watcher checks RAP availability every <strong>2 minutes for up to 24 minutes</strong>. When it finds a preferred product newer than the published one, it regenerates the maps, static images, metadata, and unsmoothed readout/diagnostic grid, then deploys them to GitHub Pages.</p>
+        <p>GitHub Actions launches watcher runs at approximately <strong>:07 and :37 each hour</strong>. Each scheduled watcher checks RAP availability every <strong>2 minutes for up to 24 minutes</strong>. When it finds a preferred product newer than the published one, it runs the scientific-fidelity tests, regenerates the maps, static images, metadata, and unsmoothed readout/diagnostic grid, then deploys them to GitHub Pages.</p>
         <p>An open webpage checks <code>latest.json</code> every <strong>2 minutes</strong> and also checks when you return to a hidden tab. The hover-readout data independently checks for a new published version about every 125 seconds.</p>
       </section>
 
@@ -238,17 +259,17 @@
         <ul class="reference-list">
           <li>The model is conditional on convection and does not forecast storm initiation.</li>
           <li>The training cases are damaging-wind reports and null-convection cases, not a perfect catalogue of confirmed microbursts.</li>
-          <li>The research dataset used point-based RAP sounding extraction; this implementation uses gridded RAP calculations.</li>
-          <li>Derived fields such as DCAPE, theta-e deficit, and lapse rates should continue to be checked against the original research extraction.</li>
+          <li>The predictor definitions and final logistic equation now mirror the final project methodology.</li>
+          <li>The original research sampled point-based RAP BUFKIT soundings; the live product applies those definitions to gridded RAP data. Historical grid-versus-BUFKIT comparison remains the key validation step.</li>
           <li>The 0–10 index is a presentation transform of model probability, not a separate physical parameter.</li>
-          <li>Independent operational verification statistics are not yet included in this repository.</li>
+          <li>The displayed AUC/Brier/log-loss/average-precision values are research cross-validation metrics, not independent real-time verification.</li>
         </ul>
       </section>
 
       <section id="help-troubleshooting" class="modal-section">
         <h3>Troubleshooting</h3>
         <p><strong>Map looks stale:</strong> compare the Valid and RAP cycle/fXX text at the top. The browser normally refreshes automatically; a hard refresh can be used after webpage-code changes.</p>
-        <p><strong>Hover readout unavailable:</strong> the latest guidance run may have failed before creating <code>readout_grid.json</code>, or the browser may still be on a deployment generated before diagnostics were added.</p>
+        <p><strong>Hover readout unavailable:</strong> the latest guidance run may have failed before creating <code>readout_grid.json</code>, or the browser may still be on an older deployment.</p>
         <p><strong>Boundary layer fails:</strong> those overlays are loaded from external NOAA/NWS and Census services, so a temporary service/network problem can affect them without affecting the RAP guidance itself.</p>
         <p><strong>Diagnostics panel shows no values:</strong> enable hover readout and place the cursor inside the valid guidance coverage.</p>
       </section>
@@ -257,12 +278,10 @@
 
   referenceButton.addEventListener('click', async () => {
     openModal(referenceModal);
-    if (referenceLoaded) return;
     referenceContent.innerHTML = '<p>Loading model reference and current imagery…</p>';
     try {
       const { metadata, grid } = await referenceData();
       renderReference(metadata, grid);
-      referenceLoaded = true;
     } catch (error) {
       console.error(error);
       referenceContent.innerHTML = `<div class="modal-error">${escapeHtml(error.message || 'Could not load reference information.')}</div>`;
