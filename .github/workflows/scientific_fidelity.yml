@@ -1,0 +1,45 @@
+name: Scientific fidelity tests
+
+on:
+  pull_request:
+    paths:
+      - "mbcp_guidance/**"
+      - "config/refined_gulf_coast_model.json"
+      - "tests/**"
+      - ".github/workflows/scientific_fidelity.yml"
+  push:
+    branches: [main]
+    paths:
+      - "mbcp_guidance/**"
+      - "config/refined_gulf_coast_model.json"
+      - "tests/**"
+      - ".github/workflows/scientific_fidelity.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  scientific-fidelity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libeccodes0
+          python -m pip install --upgrade pip
+          python -m pip install numpy xarray scipy pint metpy cfgrib eccodes
+
+      - name: Run scientific fidelity regression tests
+        run: |
+          PYTHONPATH=. python -m unittest discover -s tests -p "test_*.py" -v
