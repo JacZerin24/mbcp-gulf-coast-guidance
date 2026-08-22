@@ -6,6 +6,8 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
+import numpy as np
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -52,7 +54,7 @@ def write_error_outputs(output_dir: Path, asset_dir: Path, err: BaseException) -
 
     payload = {
         "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "display_version": 5,
+        "display_version": 6,
         "status": "error",
         "error_message": str(err),
         "error_log": "guidance_error.txt",
@@ -74,6 +76,8 @@ def write_error_outputs(output_dir: Path, asset_dir: Path, err: BaseException) -
             "probability": "assets/latest_probability.png",
         },
         "readout": None,
+        "field_methods": None,
+        "field_stats": None,
         "disclaimer": (
             "Experimental/research guidance only. Not official NWS operational guidance."
         ),
@@ -130,6 +134,25 @@ def generate_guidance(args) -> None:
 
     print("Calculating gridded environmental fields...")
     fields = calculate_environmental_fields(datasets, bounding_box)
+
+    mlcape_values = np.asarray(fields["mlcape_jkg"].values, dtype=float)
+    mlcape_valid = mlcape_values[np.isfinite(mlcape_values)]
+    if mlcape_valid.size == 0:
+        raise ValueError("Calculated MLCAPE field contained no valid grid points")
+    mlcape_stats = {
+        "valid_grid_points": int(mlcape_valid.size),
+        "minimum_jkg": round(float(np.min(mlcape_valid)), 1),
+        "median_jkg": round(float(np.median(mlcape_valid)), 1),
+        "maximum_jkg": round(float(np.max(mlcape_valid)), 1),
+    }
+    print(
+        "Calculated 100-hPa MLCAPE from RAP profiles: "
+        f"n={mlcape_stats['valid_grid_points']}, "
+        f"min={mlcape_stats['minimum_jkg']:.1f}, "
+        f"median={mlcape_stats['median_jkg']:.1f}, "
+        f"max={mlcape_stats['maximum_jkg']:.1f} J/kg"
+    )
+
     print("Applying refined Gulf Coast logistic model...")
     probability, index = apply_refined_model(fields, model_config)
 
@@ -205,7 +228,7 @@ def generate_guidance(args) -> None:
         layers={"index": index_layer, "probability": probability_layer},
     )
     latest_payload = json.loads(latest_path.read_text(encoding="utf-8"))
-    latest_payload["display_version"] = 5
+    latest_payload["display_version"] = 6
     latest_payload["readout"] = readout_metadata
     latest_payload["model"] = {
         "name": model_config.get("name", "refined Gulf Coast model"),
@@ -213,6 +236,19 @@ def generate_guidance(args) -> None:
         "target": model_config.get("target", "conditional damaging wind probability"),
         "predictor_count": len(model_config.get("variables", {})),
     }
+    latest_payload["field_methods"] = {
+        "mlcape_jkg": {
+            "method": "MetPy mixed_layer_cape_cin",
+            "mixed_layer_depth_hpa": 100,
+            "profile_source": "RAP pressure-level temperature and relative humidity",
+            "surface_augmentation": (
+                "RAP surface pressure plus 2-m temperature/dewpoint when available; "
+                "otherwise lowest valid pressure level"
+            ),
+            "native_rap_cape_diagnostic_used": False,
+        }
+    }
+    latest_payload["field_stats"] = {"mlcape_jkg": mlcape_stats}
     latest_path.write_text(
         json.dumps(latest_payload, indent=2),
         encoding="utf-8",

@@ -6,6 +6,7 @@ from metpy.calc import (
     dewpoint_from_relative_humidity,
     downdraft_cape,
     equivalent_potential_temperature,
+    mixed_layer_cape_cin,
 )
 from metpy.units import units
 
@@ -120,6 +121,181 @@ def _thetae_deficit(ds: xr.Dataset) -> xr.DataArray:
     return (low - mid).rename("thetae_deficit_k")
 
 
+def _to_kelvin(values: np.ndarray) -> np.ndarray:
+    values = np.asarray(values, dtype=float)
+    if np.nanmax(values) < 150:
+        return values + 273.15
+    return values
+
+
+def _to_hpa(value: float) -> float:
+    value = float(value)
+    return value / 100.0 if value > 2000 else value
+
+
+def _mlcape_profile_value(
+    temperature_profile: np.ndarray,
+    rh_profile: np.ndarray,
+    surface_pressure: float,
+    surface_temperature: float,
+    surface_dewpoint: float,
+    pressure_hpa: np.ndarray,
+) -> float:
+    """Calculate 100-hPa mixed-layer CAPE for one RAP gridpoint.
+
+    The parcel is calculated directly from RAP temperature/moisture profiles using
+    MetPy's ``mixed_layer_cape_cin``. When RAP surface pressure plus 2-m temperature
+    and dewpoint are available, that surface observation is prepended to the
+    pressure-level profile so the mixed layer begins at the analyzed surface.
+    Otherwise the lowest valid pressure level is used as the profile bottom.
+    """
+    temperature = np.asarray(temperature_profile, dtype=float)
+    relative_humidity = np.asarray(rh_profile, dtype=float)
+    pressure = np.asarray(pressure_hpa, dtype=float)
+
+    valid = np.isfinite(temperature) & np.isfinite(relative_humidity) & np.isfinite(pressure)
+    if valid.sum() < 8:
+        return np.nan
+
+    temperature = temperature[valid]
+    relative_humidity = relative_humidity[valid]
+    pressure = pressure[valid]
+
+    temperature_k = _to_kelvin(temperature)
+    relative_humidity = np.clip(
+        relative_humidity / 100.0 if np.nanmax(relative_humidity) > 1.5 else relative_humidity,
+        0.001,
+        1.0,
+    )
+
+    try:
+        dewpoint = dewpoint_from_relative_humidity(
+            temperature_k * units.kelvin,
+            relative_humidity * units.dimensionless,
+        )
+        dewpoint_k = np.asarray(dewpoint.to("kelvin").magnitude, dtype=float)
+    except Exception:
+        return np.nan
+
+    # Add the analyzed surface point when all three surface diagnostics are usable.
+    if (
+        np.isfinite(surface_pressure)
+        and np.isfinite(surface_temperature)
+        and np.isfinite(surface_dewpoint)
+    ):
+        psfc_hpa = _to_hpa(surface_pressure)
+        if 800.0 <= psfc_hpa <= 1100.0:
+            tsfc_k = float(_to_kelvin(np.asarray([surface_temperature]))[0])
+            tdsfc_k = float(_to_kelvin(np.asarray([surface_dewpoint]))[0])
+            tdsfc_k = min(tdsfc_k, tsfc_k)
+
+            # Explicitly remove any isobaric values below the analyzed surface.
+            # Some model files can contain extrapolated values at pressures greater
+            # than surface pressure, and those must not become the parcel bottom.
+            above_surface = pressure <= psfc_hpa + 0.5
+            pressure = pressure[above_surface]
+            temperature_k = temperature_k[above_surface]
+            dewpoint_k = dewpoint_k[above_surface]
+            if pressure.size < 8:
+                return np.nan
+
+            nearest = np.where(np.abs(pressure - psfc_hpa) <= 0.5)[0]
+            if nearest.size:
+                index = int(nearest[0])
+                temperature_k[index] = tsfc_k
+                dewpoint_k[index] = tdsfc_k
+                pressure[index] = psfc_hpa
+            else:
+                pressure = np.append(pressure, psfc_hpa)
+                temperature_k = np.append(temperature_k, tsfc_k)
+                dewpoint_k = np.append(dewpoint_k, tdsfc_k)
+
+    # Sounding calculations require pressure to decrease monotonically with height.
+    order = np.argsort(pressure)[::-1]
+    pressure = pressure[order]
+    temperature_k = temperature_k[order]
+    dewpoint_k = dewpoint_k[order]
+
+    # Remove duplicate pressure levels while preserving the descending order.
+    _, unique_indices = np.unique(pressure, return_index=True)
+    unique_indices = np.sort(unique_indices)
+    pressure = pressure[unique_indices]
+    temperature_k = temperature_k[unique_indices]
+    dewpoint_k = dewpoint_k[unique_indices]
+
+    if pressure.size < 8 or pressure[0] - pressure[-1] < 100.0:
+        return np.nan
+
+    # Keep enough upper-air depth to avoid silently truncating deep CAPE profiles.
+    if pressure[-1] > 300.0:
+        return np.nan
+
+    try:
+        mlcape, _ = mixed_layer_cape_cin(
+            pressure * units.hPa,
+            temperature_k * units.kelvin,
+            dewpoint_k * units.kelvin,
+            depth=100 * units.hPa,
+        )
+        value = float(mlcape.to("joule / kilogram").magnitude)
+        return max(value, 0.0) if np.isfinite(value) else np.nan
+    except Exception:
+        # Below-ground levels, incomplete profiles, or individual parcel failures
+        # should leave only that gridpoint missing rather than aborting the domain.
+        return np.nan
+
+
+def _mlcape_from_pressure_profiles(
+    ds: xr.Dataset,
+    surface_pressure: xr.DataArray,
+    surface_temperature: xr.DataArray,
+    surface_dewpoint: xr.DataArray,
+) -> xr.DataArray:
+    """Calculate gridded 100-hPa MLCAPE directly from RAP thermodynamic profiles."""
+    lev = _pressure_coord(ds)
+    if "t" not in ds.data_vars or "r" not in ds.data_vars:
+        raise ValueError("Temperature and relative humidity profiles are required for MLCAPE")
+
+    levels = [float(p) for p in ds[lev].values if 100 <= float(p) <= 1000]
+    if len(levels) < 8:
+        raise ValueError("Insufficient RAP pressure levels between 1000 and 100 hPa for MLCAPE")
+
+    temperature = ds["t"].sel({lev: levels})
+    relative_humidity = ds["r"].sel({lev: levels})
+    pressure_hpa = np.asarray(levels, dtype=float)
+
+    mlcape = xr.apply_ufunc(
+        _mlcape_profile_value,
+        temperature,
+        relative_humidity,
+        surface_pressure,
+        surface_temperature,
+        surface_dewpoint,
+        input_core_dims=[[lev], [lev], [], [], []],
+        output_core_dims=[[]],
+        vectorize=True,
+        dask="parallelized",
+        output_dtypes=[float],
+        kwargs={"pressure_hpa": pressure_hpa},
+    ).rename("mlcape_jkg")
+
+    mlcape.attrs.update(
+        {
+            "long_name": "100-hPa mixed-layer CAPE",
+            "units": "J kg-1",
+            "calculation_method": "MetPy mixed_layer_cape_cin",
+            "mixed_layer_depth_hpa": 100,
+            "native_rap_cape_used": False,
+            "profile_source": "RAP pressure-level temperature and relative humidity",
+            "surface_augmentation": (
+                "RAP surface pressure plus 2-m temperature/dewpoint when available; "
+                "otherwise lowest valid pressure level"
+            ),
+        }
+    )
+    return mlcape
+
+
 def _dcape_profile_value(
     temperature_profile: np.ndarray,
     rh_profile: np.ndarray,
@@ -221,9 +397,9 @@ def _diagnostic_or_nan(
 def calculate_environmental_fields(datasets: list[xr.Dataset], bbox: dict) -> dict[str, xr.DataArray]:
     """Calculate gridded fields required by the refined model.
 
-    This is the full-gridded prototype. It calculates pressure-level terms directly
-    from RAP and uses native diagnostic fields where available. If RAP does not
-    provide a decoded DCAPE diagnostic, DCAPE is calculated from each pressure profile.
+    Pressure-level thermodynamic terms and MLCAPE are calculated directly from RAP.
+    Native diagnostic fields are still used where appropriate for other predictors;
+    DCAPE is calculated from pressure profiles if a native decoded diagnostic is absent.
     """
     iso = subset_domain(find_isobaric_dataset(datasets), bbox)
 
@@ -243,13 +419,42 @@ def calculate_environmental_fields(datasets: list[xr.Dataset], bbox: dict) -> di
     fields["thetae_deficit_k"] = _thetae_deficit(iso)
 
     template = fields["vertical_totals_850_500_c"]
-    fields["mlcape_jkg"] = _diagnostic_or_nan(
+
+    # Surface fields make the 100-hPa mixed parcel start at the analyzed surface.
+    # Exact short names are used to avoid accidentally grabbing another thermodynamic layer.
+    surface_pressure = _diagnostic_or_nan(
         datasets,
         bbox,
-        candidates=["mlcape", "mixed layer cape", "cape"],
+        candidates=["sp", "pres"],
         template=template,
-        name="mlcape_jkg",
+        name="surface_pressure",
     )
+    surface_temperature = _diagnostic_or_nan(
+        datasets,
+        bbox,
+        candidates=["2t", "t2m"],
+        template=template,
+        name="surface_temperature",
+    )
+    surface_dewpoint = _diagnostic_or_nan(
+        datasets,
+        bbox,
+        candidates=["2d", "d2m"],
+        template=template,
+        name="surface_dewpoint",
+    )
+
+    fields["mlcape_jkg"] = _mlcape_from_pressure_profiles(
+        iso,
+        surface_pressure,
+        surface_temperature,
+        surface_dewpoint,
+    )
+    try:
+        fields["mlcape_jkg"] = fields["mlcape_jkg"].interp_like(template)
+    except Exception:
+        pass
+
     fields["sbli_c"] = _diagnostic_or_nan(
         datasets,
         bbox,
