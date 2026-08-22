@@ -20,6 +20,10 @@
   let sampleTimer = null;
   let requestSequence = 0;
 
+  function emitSample(detail) {
+    window.dispatchEvent(new CustomEvent('mbcp:hover-sample', { detail }));
+  }
+
   function readoutVersion(metadata) {
     const cycle = metadata?.cycle?.cycle_time_utc || 'unknown-cycle';
     const valid = metadata?.cycle?.valid_time_utc || cycle;
@@ -158,9 +162,10 @@
     positionTooltip(mouseEvent);
   }
 
-  function hideTooltip() {
+  function hideTooltip(clearSample = true) {
     tooltip.className = 'hover-readout-tooltip is-hidden';
     tooltip.innerHTML = '';
+    if (clearSample) emitSample(null);
   }
 
   function showLoading(mouseEvent) {
@@ -177,6 +182,7 @@
       mouseEvent,
       'is-error'
     );
+    emitSample(null);
   }
 
   function showOutsideCoverage(distance, maxDistance, mouseEvent) {
@@ -186,9 +192,10 @@
       mouseEvent,
       'is-outside'
     );
+    emitSample(null);
   }
 
-  function showValues(metadata, point, distance, mouseEvent) {
+  function showValues(metadata, grid, point, distance, mouseEvent) {
     const product = productDetails(metadata);
     const indexValue = formatValue(point[2], 1);
     const probabilityValue = `${formatValue(point[3], 1)}%`;
@@ -213,6 +220,14 @@
        </div>`,
       mouseEvent
     );
+
+    emitSample({
+      metadata,
+      grid,
+      point,
+      distance,
+      location: latestLatLng ? { lat: latestLatLng.lat, lng: latestLatLng.lng } : null
+    });
   }
 
   async function updateHoverSample() {
@@ -234,7 +249,7 @@
       if (distance > maxDistance) {
         showOutsideCoverage(distance, maxDistance, latestMouseEvent);
       } else {
-        showValues(metadata, point, distance, latestMouseEvent);
+        showValues(metadata, grid, point, distance, latestMouseEvent);
       }
     } catch (error) {
       console.error(error);
@@ -300,7 +315,7 @@
     hideTooltip();
   });
 
-  map.on('movestart zoomstart', hideTooltip);
+  map.on('movestart zoomstart', () => hideTooltip());
 
   document.querySelectorAll('input[name="layer"]').forEach(input => {
     input.addEventListener('change', () => {

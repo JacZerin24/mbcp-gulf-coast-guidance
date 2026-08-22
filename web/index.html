@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css?v=4" />
   <link rel="stylesheet" href="readout.css?v=2" />
+  <link rel="stylesheet" href="tools.css?v=1" />
 </head>
 <body>
   <header>
@@ -14,7 +15,11 @@
       <h1>Experimental Gulf Coast Damaging Wind Guidance</h1>
       <p id="subtitle">Loading latest RAP-based guidance...</p>
     </div>
-    <div class="badge">Research prototype</div>
+    <div class="header-actions">
+      <button id="reference-button" class="header-button" type="button">Reference</button>
+      <button id="help-button" class="header-button" type="button">Help</button>
+      <div class="badge">Research prototype</div>
+    </div>
   </header>
 
   <main>
@@ -31,6 +36,19 @@
           <span><strong>Probability</strong><small>Conditional model probability</small></span>
         </label>
         <p id="layer-description" class="helper-text">A simplified 0–10 presentation of conditional damaging-wind favorability.</p>
+      </section>
+
+      <section class="control-section">
+        <h2>Map overlays</h2>
+        <label class="tool-toggle">
+          <input id="cwa-toggle" type="checkbox" />
+          <span><strong>LIX CWA outline</strong><small>Official NWS County Warning Area boundary.</small></span>
+        </label>
+        <label class="tool-toggle">
+          <input id="county-toggle" type="checkbox" />
+          <span><strong>County/parish outlines</strong><small>U.S. Census TIGERweb county-equivalent boundaries.</small></span>
+        </label>
+        <p id="boundary-status" class="helper-text">Boundary layers load only when enabled.</p>
       </section>
 
       <section class="control-section">
@@ -54,6 +72,18 @@
       </section>
 
       <section class="control-section">
+        <h2>Composite diagnostics</h2>
+        <label class="tool-toggle diagnostics-toggle">
+          <input id="diagnostics-toggle" type="checkbox" />
+          <span>
+            <strong>Show parameter drivers</strong>
+            <small>Rank the seven standardized model contributions at the hovered RAP grid point.</small>
+          </span>
+        </label>
+        <p class="helper-text">Positive contributions raise the model logit; negative contributions lower it. This explains the model calculation, not physical causality.</p>
+      </section>
+
+      <section class="control-section">
         <h2>Index interpretation</h2>
         <ul class="interpretation-list">
           <li><strong>0–2:</strong> low conditional signal</li>
@@ -65,7 +95,7 @@
 
       <section class="control-section note-card">
         <h2>Visualization note</h2>
-        <p>Light smoothing is applied only to the rendered map and images to reduce grid-cell blockiness. Hover readouts use the unsmoothed model values.</p>
+        <p>Light smoothing is applied only to the rendered map and images to reduce grid-cell blockiness. Hover readouts and parameter diagnostics use the unsmoothed model values.</p>
       </section>
 
       <section class="control-section caveat-card">
@@ -83,8 +113,37 @@
     </aside>
   </main>
 
+  <div id="reference-modal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="reference-title">
+    <section class="info-modal">
+      <div class="modal-header">
+        <div>
+          <div class="modal-kicker">Science and model details</div>
+          <h2 id="reference-title">Composite reference</h2>
+        </div>
+        <button class="modal-close" type="button" data-close-modal="reference-modal" aria-label="Close reference">×</button>
+      </div>
+      <div id="reference-content" class="modal-content"><p>Loading reference information...</p></div>
+    </section>
+  </div>
+
+  <div id="help-modal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="help-title">
+    <section class="info-modal help-modal">
+      <div class="modal-header">
+        <div>
+          <div class="modal-kicker">User guide</div>
+          <h2 id="help-title">Comprehensive help</h2>
+        </div>
+        <button class="modal-close" type="button" data-close-modal="help-modal" aria-label="Close help">×</button>
+      </div>
+      <div id="help-content" class="modal-content"></div>
+    </section>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js?v=6"></script>
-  <script src="readout.js?v=2"></script>
+  <script src="readout.js?v=3"></script>
+  <script src="boundaries.js?v=1"></script>
+  <script src="diagnostics.js?v=1"></script>
+  <script src="information.js?v=1"></script>
 </body>
 </html>

@@ -52,7 +52,7 @@ def write_error_outputs(output_dir: Path, asset_dir: Path, err: BaseException) -
 
     payload = {
         "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "display_version": 4,
+        "display_version": 5,
         "status": "error",
         "error_message": str(err),
         "error_log": "guidance_error.txt",
@@ -144,10 +144,12 @@ def generate_guidance(args) -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     args.asset_dir.mkdir(parents=True, exist_ok=True)
 
-    print("Writing unsmoothed point-readout data...")
+    print("Writing unsmoothed point-readout and parameter diagnostics data...")
     readout_metadata = write_readout_grid(
         index_raw,
         probability_raw,
+        fields,
+        model_config,
         args.output_dir / "readout_grid.json",
         cycle_meta,
     )
@@ -203,8 +205,14 @@ def generate_guidance(args) -> None:
         layers={"index": index_layer, "probability": probability_layer},
     )
     latest_payload = json.loads(latest_path.read_text(encoding="utf-8"))
-    latest_payload["display_version"] = 4
+    latest_payload["display_version"] = 5
     latest_payload["readout"] = readout_metadata
+    latest_payload["model"] = {
+        "name": model_config.get("name", "refined Gulf Coast model"),
+        "version": model_config.get("version", "unknown"),
+        "target": model_config.get("target", "conditional damaging wind probability"),
+        "predictor_count": len(model_config.get("variables", {})),
+    }
     latest_path.write_text(
         json.dumps(latest_payload, indent=2),
         encoding="utf-8",
