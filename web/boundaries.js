@@ -6,8 +6,12 @@
 
   const DEFAULT_BOUNDS = [[28.0, -91.8], [31.6, -88.0]];
   const CWA_ENDPOINT = 'https://mapservices.weather.noaa.gov/static/rest/services/nws_reference_maps/nws_reference_map/FeatureServer/1/query';
+  const STATE_ENDPOINT = 'https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/10/query';
   const COUNTY_ENDPOINT = 'https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1/query';
 
+  map.createPane('stateBoundaryPane');
+  map.getPane('stateBoundaryPane').style.zIndex = 420;
+  map.getPane('stateBoundaryPane').style.pointerEvents = 'none';
   map.createPane('countyBoundaryPane');
   map.getPane('countyBoundaryPane').style.zIndex = 430;
   map.getPane('countyBoundaryPane').style.pointerEvents = 'none';
@@ -15,10 +19,13 @@
   map.getPane('cwaBoundaryPane').style.zIndex = 440;
   map.getPane('cwaBoundaryPane').style.pointerEvents = 'none';
 
+  let stateLayer = null;
   let cwaLayer = null;
   let countyLayer = null;
+  let stateData = null;
   let cwaData = null;
   let countyData = null;
+  let stateLoading = false;
   let cwaLoading = false;
   let countyLoading = false;
 
@@ -42,6 +49,17 @@
       throw new Error('Boundary service did not return GeoJSON features');
     }
     return data;
+  }
+
+  function stateUrl() {
+    const params = new URLSearchParams({
+      where: '1=1',
+      outFields: 'NAME,STUSAB,GEOID',
+      returnGeometry: 'true',
+      outSR: '4326',
+      f: 'geojson'
+    });
+    return `${STATE_ENDPOINT}?${params.toString()}`;
   }
 
   function cwaUrl() {
@@ -71,6 +89,19 @@
     return `${COUNTY_ENDPOINT}?${params.toString()}`;
   }
 
+  function buildStateLayer(data) {
+    return L.geoJSON(data, {
+      pane: 'stateBoundaryPane',
+      interactive: false,
+      style: {
+        color: '#64748b',
+        weight: 1.25,
+        opacity: 0.88,
+        fillOpacity: 0
+      }
+    });
+  }
+
   function buildCwaLayer(data) {
     return L.geoJSON(data, {
       pane: 'cwaBoundaryPane',
@@ -95,6 +126,26 @@
         fillOpacity: 0
       }
     });
+  }
+
+  async function enableStates() {
+    if (stateLayer) {
+      stateLayer.addTo(map);
+      return;
+    }
+    if (stateLoading) return;
+    stateLoading = true;
+    try {
+      stateData = stateData || await fetchGeoJson(stateUrl());
+      stateLayer = buildStateLayer(stateData).addTo(map);
+      map.attributionControl.addAttribution('State boundaries: U.S. Census Bureau TIGERweb');
+      setStatus('State outlines enabled by default. Optional boundary layers load when enabled.');
+    } catch (error) {
+      console.error(error);
+      setStatus(`Could not load state outlines: ${error.message}`, true);
+    } finally {
+      stateLoading = false;
+    }
   }
 
   async function enableCwa() {
@@ -148,7 +199,7 @@
       cwaLayer.remove();
       setStatus(countyToggle.checked
         ? 'County/parish outlines enabled.'
-        : 'Boundary layers load only when enabled.');
+        : 'State outlines enabled by default.');
     }
   });
 
@@ -159,7 +210,9 @@
       countyLayer.remove();
       setStatus(cwaToggle.checked
         ? 'LIX CWA outline enabled.'
-        : 'Boundary layers load only when enabled.');
+        : 'State outlines enabled by default.');
     }
   });
+
+  enableStates();
 })();
