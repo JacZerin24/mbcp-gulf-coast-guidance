@@ -6,7 +6,7 @@
 
   const DEFAULT_BOUNDS = [[28.0, -91.8], [31.6, -88.0]];
   const CWA_ENDPOINT = 'https://mapservices.weather.noaa.gov/static/rest/services/nws_reference_maps/nws_reference_map/FeatureServer/1/query';
-  const STATE_ENDPOINT = 'https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/10/query';
+  const STATE_ENDPOINT = 'https://tigerweb.geo.census.gov/arcgis/rest/services/Generalized_TAB2020/State_County/MapServer/9/query';
   const COUNTY_ENDPOINT = 'https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1/query';
 
   map.createPane('stateBoundaryPane');
@@ -54,7 +54,7 @@
   function stateUrl() {
     const params = new URLSearchParams({
       where: '1=1',
-      outFields: 'NAME,STUSAB,GEOID',
+      outFields: 'NAME,GEOID',
       returnGeometry: 'true',
       outSR: '4326',
       f: 'geojson'
@@ -94,9 +94,9 @@
       pane: 'stateBoundaryPane',
       interactive: false,
       style: {
-        color: '#64748b',
-        weight: 1.25,
-        opacity: 0.88,
+        color: '#475569',
+        weight: 1.5,
+        opacity: 0.9,
         fillOpacity: 0
       }
     });
