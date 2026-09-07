@@ -21,10 +21,8 @@ const map = L.map('map', {
   maxZoom: 12
 }).setView([30.15, -89.9], 8);
 
-L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-  subdomains: 'abcd',
-  maxZoom: 12,
-  attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+L.maplibreGL({
+  style: 'https://tiles.openfreemap.org/styles/positron'
 }).addTo(map);
 
 L.control.scale({ imperial: true, metric: false, position: 'bottomleft' }).addTo(map);
