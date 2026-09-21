@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import cfgrib
 import xarray as xr
 
 
@@ -142,6 +141,12 @@ def download_latest_rap(cache_dir: str | Path = "cache") -> tuple[Path, dict]:
 
 def open_grib_datasets(path: str | Path) -> list[xr.Dataset]:
     """Open all cfgrib-compatible groups from a RAP GRIB2 file."""
+    # Import cfgrib only when we actually need to decode GRIB data. The RAP
+    # availability watcher only needs Herbie inventory metadata, and eagerly
+    # loading cfgrib/ecCodes there can initialize native libraries that are
+    # unnecessary for the watcher process.
+    import cfgrib
+
     return cfgrib.open_datasets(str(path), backend_kwargs={"indexpath": ""})
 
 
