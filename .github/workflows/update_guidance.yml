@@ -51,12 +51,17 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libeccodes0 libeccodes-dev libgeos-dev proj-bin
+          sudo apt-get install -y libgeos-dev proj-bin
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
+
+      - name: Verify ecCodes installation
+        run: |
+          python -m eccodes selfcheck
+          python -c "import eccodes; print('ecCodes Python import OK')"
 
       - name: Verify scientific fidelity
         run: |
